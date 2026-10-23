@@ -71,6 +71,7 @@ jobs:
           pip install -r requirements.txt
           python manage.py check
           python manage.py makemigrations --check --dry-run
+          python manage.py collectstatic --noinput   # templates use the hashed-manifest storage
           python manage.py test -v 1
 
       - uses: docker/setup-buildx-action@v3
