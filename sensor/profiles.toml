@@ -1,0 +1,29 @@
+# Which persona answers which request. First match wins; keys inside [profile.match] are ANDed;
+# a missing key matches anything. Keep a catch-all last.
+#
+# Examples of what this can express:
+#
+#   [[profile]]                       # one network gets a different persona
+#   name = "react-for-that-fleet"
+#   bundle = "react"
+#   [profile.match]
+#   cidr = ["203.0.113.0/24", "198.51.100.7"]
+#
+#   [[profile]]                       # brand names that must not look like bait
+#   name = "quiet"
+#   bundle = "php"
+#   tier = "bare"
+#   [profile.match]
+#   host = ["*.example-brand.ch", "example-brand.com"]
+#
+#   [[profile]]                       # version header only, no info page
+#   name = "php-header"
+#   bundle = "php"
+#   tier = "header"
+#   [profile.match]
+#   host = ["backup.example.org"]
+
+[[profile]]
+name = "php-full"
+bundle = "php"
+tier = "full"

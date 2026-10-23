@@ -1,0 +1,19 @@
+# Persona: a small PHP document-exchange site behind Apache on Debian.
+# Everything here is data. Nothing in a bundle is ever executed.
+
+server = "Apache/2.4.62 (Debian)"
+powered_by = "PHP/8.3.30"     # sent on tiers "header" and "full"; never on "bare"
+cookie = "PHPSESSID"          # a fresh value per response, like a real PHP session start
+
+# Paths that ask for an info page get the real one on tier "full". These are the last path
+# segments (with or without .php) that scanners' wordlists actually use.
+info_names = ["phpinfo", "php-info", "php_info", "infophp", "info", "pinfo",
+              "systeminfo", "system-info", "system_info", "test", "i", "pi", "php"]
+info_dirs  = ["/phpinfo/", "/php-info/", "/php_info/", "/_profiler/phpinfo"]
+
+[routes]
+index    = "index.html"     # "/", "/index.php", any *.php that is not WordPress-shaped
+upload   = "upload.html"    # "?page=upload" on tier "full": a real multipart form
+plain    = "plain.html"     # tier "bare": a placeholder that attributes nothing to anyone
+notfound = "404.html"
+info     = "phpinfo.html"   # captured from a stock php:8.3.30-apache image, request-specific parts removed
