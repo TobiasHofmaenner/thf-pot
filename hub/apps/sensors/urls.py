@@ -8,4 +8,5 @@ urlpatterns = [
     path("new", views.node_create, name="node_create"),
     path("<int:pk>/rotate", views.node_rotate, name="node_rotate"),
     path("<int:pk>/toggle", views.node_toggle, name="node_toggle"),
+    path("<int:pk>/delete", views.node_delete, name="node_delete"),
 ]

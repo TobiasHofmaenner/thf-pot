@@ -196,6 +196,19 @@ class NodePageTests(TestCase):
         self.client.post(f"/nodes/{node.pk}/toggle")
         self.assertEqual(Sensor.authenticate(tok), node)
 
+    def test_delete_only_revoked_nodes_without_events(self):
+        node = Sensor(name="n", domains=["x.example.org"])
+        node.mint_token()
+        node.save()
+        self.assertEqual(self.client.post(f"/nodes/{node.pk}/delete").status_code, 400)  # still active
+        node.is_active = False
+        node.save()
+        Event.objects.create(sensor=node, ulid="01JAX000000000000000000009", ts=timezone.now(), src="203.0.113.9", method="GET")
+        self.assertEqual(self.client.post(f"/nodes/{node.pk}/delete").status_code, 400)  # has evidence
+        Event.objects.all().delete()
+        self.assertEqual(self.client.post(f"/nodes/{node.pk}/delete").status_code, 200)
+        self.assertFalse(Sensor.objects.filter(pk=node.pk).exists())
+
     def test_duplicate_name_is_an_error_not_a_500(self):
         Sensor(name="files.example.org", domains=["files.example.org"], token_sha256="x" * 64, token_prefix="x").save()
         r = self.client.post("/nodes/new", {"domains": "files.example.org"})

@@ -89,3 +89,13 @@ def node_toggle(request, pk):
     sensor.is_active = not sensor.is_active
     sensor.save(update_fields=["is_active"])
     return _list(request)
+
+
+@require_POST
+def node_delete(request, pk):
+    """Only a revoked node that never produced an event can go; anything with events is evidence."""
+    sensor = get_object_or_404(Sensor, pk=pk)
+    if sensor.is_active or sensor.events.exists():
+        return HttpResponseBadRequest("only a revoked node without events can be deleted")
+    sensor.delete()
+    return _list(request)

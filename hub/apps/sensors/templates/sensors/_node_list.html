@@ -20,6 +20,8 @@
                 hx-confirm="Rotate the token for {{ n.name }}? The running sensor will be locked out until it gets the new one.">rotate</button>
         <button hx-post="{% url 'node_toggle' n.pk %}" hx-target="#nodes" hx-swap="innerHTML"
                 {% if n.is_active %}hx-confirm="Revoke {{ n.name }}? Its batches will be refused until re-enabled."{% endif %}>{% if n.is_active %}revoke{% else %}enable{% endif %}</button>
+        {% if not n.is_active and n.events_total == 0 %}<button hx-post="{% url 'node_delete' n.pk %}" hx-target="#nodes" hx-swap="innerHTML"
+                hx-confirm="Delete {{ n.name }}? It never produced an event, so nothing is lost.">delete</button>{% endif %}
       </td>
     </tr>
   {% endfor %}
