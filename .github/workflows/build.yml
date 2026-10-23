@@ -35,6 +35,7 @@ jobs:
         run: |
           echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
           echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"   # ghcr requires lowercase
       - uses: docker/build-push-action@v6
         with:
           context: sensor
@@ -43,5 +44,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/${{ github.repository_owner }}/thf-pot-sensor:main
-            ghcr.io/${{ github.repository_owner }}/thf-pot-sensor:main-${{ steps.meta.outputs.ts }}-${{ steps.meta.outputs.sha }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/thf-pot-sensor:main
+            ghcr.io/${{ steps.meta.outputs.owner }}/thf-pot-sensor:main-${{ steps.meta.outputs.ts }}-${{ steps.meta.outputs.sha }}
