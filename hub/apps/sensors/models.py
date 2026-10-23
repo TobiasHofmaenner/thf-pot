@@ -26,8 +26,16 @@ class Sensor(models.Model):
     name = models.CharField(max_length=80, unique=True)
     kind = models.CharField(max_length=32, default=KIND_WEB)
     domains = ArrayField(models.CharField(max_length=253), default=list, blank=True)
+    # Operator addresses / networks; the node stores their requests with self=true.
+    self_ips = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     acme_email = models.EmailField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
+
+    # Where the node is (from its public address), so the map can draw arcs to it.
+    cc = models.CharField(max_length=2, blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    lat = models.FloatField(null=True, blank=True)
+    lon = models.FloatField(null=True, blank=True)
 
     token_sha256 = models.CharField(max_length=64, unique=True)
     token_prefix = models.CharField(max_length=8)

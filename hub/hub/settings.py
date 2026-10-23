@@ -110,7 +110,11 @@ CELERY_TASK_TIME_LIMIT = 300
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULE = {
     "heartbeat": {"task": "apps.core.tasks.heartbeat", "schedule": 60.0},
+    "geo-sweep": {"task": "apps.events.tasks.enrich_pending", "schedule": 60.0},
 }
+
+# DB-IP Lite databases baked into the image (see Dockerfile); absent = no geo, never an error.
+GEOIP_DIR = env("GEOIP_DIR", str(BASE_DIR / "geo"))
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

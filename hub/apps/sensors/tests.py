@@ -158,6 +158,28 @@ class NodePageTests(TestCase):
         with self.assertRaises(ValueError):
             parse_domains("not a host")
 
+    def test_self_ips_in_snippets_and_edit(self):
+        r = self.client.post("/nodes/new", {"domains": "x.example.org", "self_ips": "37.17.239.121, 2001:db8::/48"})
+        html = r.content.decode()
+        self.assertIn("SELF_IPS=37.17.239.121", html)
+        self.assertIn("SELF_NETS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,2001:db8::/48", html)
+        node = Sensor.objects.get(name="x.example.org")
+        self.assertEqual(node.self_ips, ["37.17.239.121", "2001:db8::/48"])
+        r = self.client.post("/nodes/new", {"domains": "y.example.org", "self_ips": "not-an-ip"})
+        self.assertIn("not an address", r.content.decode())
+        r = self.client.get(f"/nodes/{node.pk}/edit")
+        self.assertContains(r, "37.17.239.121")
+        r = self.client.post(f"/nodes/{node.pk}/edit", {"domains": "x.example.org, z.example.org", "self_ips": "198.51.100.7"})
+        self.assertEqual(r["HX-Trigger"], "nodes-changed")
+        self.assertIn("SELF_IPS=198.51.100.7", r.content.decode())
+        node.refresh_from_db()
+        self.assertEqual(node.domains, ["x.example.org", "z.example.org"])
+        self.assertEqual(node.self_ips, ["198.51.100.7"])
+
+    def test_nodes_page_prefills_your_ip(self):
+        r = self.client.get("/nodes/", HTTP_X_FORWARDED_FOR="37.17.239.121")
+        self.assertContains(r, 'value="37.17.239.121"')
+
     def test_add_node_mints_token_and_snippets(self):
         r = self.client.post("/nodes/new", {"domains": "files.example.org\nbackup.example.org", "acme_email": "a@b.cd"},
                              HTTP_HOST="pot.example", HTTP_X_FORWARDED_PROTO="https")

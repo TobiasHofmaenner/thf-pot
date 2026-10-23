@@ -99,6 +99,16 @@ def to_event(sensor: Sensor, rec: dict) -> Event:
     )
 
 
+def _enqueue_geo(sensor_pk: int, ulids: list[str]):
+    from apps.events.tasks import enrich_events
+
+    ids = list(Event.objects.filter(sensor_id=sensor_pk, ulid__in=ulids).values_list("id", flat=True))
+    try:
+        enrich_events.delay(ids)
+    except Exception as e:  # noqa: BLE001 - broker down: the periodic sweep catches up
+        log.warning("geo task not queued (%s); the sweep will enrich", e)
+
+
 def ingest_batch(sensor: Sensor, records: list) -> dict:
     """Insert what is new, count what is duplicate or malformed, bump the sensor's counters."""
     events, rejected = [], 0
@@ -135,6 +145,8 @@ def ingest_batch(sensor: Sensor, records: list) -> dict:
                     last_event_at=latest,
                     last_seen_at=dj_tz.now(),
                 )
+                ulids = [e.ulid for e in new]
+                transaction.on_commit(lambda: _enqueue_geo(sensor.pk, ulids))
     if not accepted:
         Sensor.objects.filter(pk=sensor.pk).update(last_seen_at=dj_tz.now())
     return {"accepted": accepted, "duplicates": duplicates, "rejected": rejected}

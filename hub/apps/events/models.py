@@ -43,7 +43,26 @@ class Event(models.Model):
     labels = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     severity = models.SmallIntegerField(null=True, blank=True)
 
+    # Geo + ASN, filled in by the worker after ingest (DB-IP Lite). geo_at null = not yet done.
+    cc = models.CharField(max_length=2, blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    lat = models.FloatField(null=True, blank=True)
+    lon = models.FloatField(null=True, blank=True)
+    asn = models.IntegerField(null=True, blank=True)
+    as_name = models.CharField(max_length=200, blank=True, default="")
+    geo_at = models.DateTimeField(null=True, blank=True)
+
     extra = models.JSONField(null=True, blank=True)
+
+    # Until the analysis layer lands, these structural flags are what makes a request "suspicious".
+    SUSPICIOUS_FLAGS = ("mp:upload_progress_field", "mp:excessive_part_headers", "mp:many_empty_file_parts",
+                        "mp:deep_nesting", "mp:huge_part_count", "mp:preamble")
+
+    @property
+    def sev(self) -> str:
+        if self.severity is not None:
+            return "malicious" if self.severity >= 2 else "suspicious" if self.severity == 1 else "benign"
+        return "suspicious" if any(f in self.SUSPICIOUS_FLAGS for f in self.flags) else "benign"
 
     class Meta:
         constraints = [
@@ -52,6 +71,7 @@ class Event(models.Model):
         indexes = [
             models.Index(fields=["src", "ts"], name="event_src_ts"),
             models.Index(fields=["sensor", "ts"], name="event_sensor_ts"),
+            models.Index(fields=["geo_at"], name="event_geo_at"),
             GinIndex(fields=["flags"], name="event_flags_gin"),
             GinIndex(fields=["labels"], name="event_labels_gin"),
         ]

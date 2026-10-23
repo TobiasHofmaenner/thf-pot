@@ -1,9 +1,12 @@
+import ipaddress
 import re
 
-from django.http import HttpResponse, HttpResponseBadRequest
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+
+from apps.core.net import client_ip
 
 from . import snippets
 from .models import Sensor
@@ -25,13 +28,32 @@ def parse_domains(text: str) -> list[str]:
     return out
 
 
+def parse_self_ips(text: str) -> list[str]:
+    """Addresses or networks, normalised; anything else is an error."""
+    out, seen = [], set()
+    for raw in re.split(r"[\s,;]+", text or ""):
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            s = str(ipaddress.ip_address(s))
+        except ValueError:
+            try:
+                s = str(ipaddress.ip_network(s, strict=False))
+            except ValueError as e:
+                raise ValueError(f"not an address or network: {raw!r}") from e
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 def _list(request, status=200):
-    resp = render(request, "sensors/_node_list.html", {"nodes": Sensor.objects.all()}, status=status)
-    return resp
+    return render(request, "sensors/_node_list.html", {"nodes": Sensor.objects.all()}, status=status)
 
 
 def nodes(request):
-    return render(request, "sensors/nodes.html", {"nodes": Sensor.objects.all()})
+    return render(request, "sensors/nodes.html", {"nodes": Sensor.objects.all(), "your_ip": client_ip(request) or ""})
 
 
 def node_list(request):
@@ -52,26 +74,45 @@ def _error(request, msg):
     return render(request, "sensors/_node_error.html", {"msg": msg}, status=200)
 
 
+def _apply_fields(sensor, post):
+    """Shared by create and edit. Raises ValueError with a message for the page."""
+    domains = parse_domains(post.get("domains", ""))
+    if not domains:
+        raise ValueError("at least one domain is required")
+    sensor.domains = domains
+    sensor.self_ips = parse_self_ips(post.get("self_ips", ""))
+    sensor.acme_email = (post.get("acme_email") or "").strip()[:254]
+    sensor.notes = (post.get("notes") or "").strip()[:2000]
+
+
 @require_POST
 def node_create(request):
+    sensor = Sensor()
     try:
-        domains = parse_domains(request.POST.get("domains", ""))
+        _apply_fields(sensor, request.POST)
     except ValueError as e:
         return _error(request, str(e))
-    if not domains:
-        return _error(request, "at least one domain is required")
-    name = (request.POST.get("name") or domains[0]).strip()[:80]
-    if Sensor.objects.filter(name=name).exists():
-        return _error(request, f"a node named {name!r} already exists")
-    sensor = Sensor(
-        name=name,
-        domains=domains,
-        acme_email=(request.POST.get("acme_email") or "").strip()[:254],
-        notes=(request.POST.get("notes") or "").strip()[:2000],
-    )
+    sensor.name = (request.POST.get("name") or sensor.domains[0]).strip()[:80]
+    if Sensor.objects.filter(name=sensor.name).exists():
+        return _error(request, f"a node named {sensor.name!r} already exists")
     token = sensor.mint_token()
     sensor.save()
     return _created(request, sensor, token, f"node {sensor.name} added")
+
+
+def node_edit(request, pk):
+    sensor = get_object_or_404(Sensor, pk=pk)
+    if request.method == "POST":
+        try:
+            _apply_fields(sensor, request.POST)
+        except ValueError as e:
+            return _error(request, str(e))
+        sensor.save(update_fields=["domains", "self_ips", "acme_email", "notes"])
+        env = [line for line in snippets.env_lines(sensor, "<unchanged>", snippets.hub_url(request)) if not line.startswith("#")]
+        resp = render(request, "sensors/_node_edited.html", {"node": sensor, "env": "\n".join(env)})
+        resp["HX-Trigger"] = "nodes-changed"
+        return resp
+    return render(request, "sensors/_node_edit.html", {"node": sensor})
 
 
 @require_POST

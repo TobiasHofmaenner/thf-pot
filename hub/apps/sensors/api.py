@@ -1,7 +1,6 @@
 """Sensor-facing endpoints (docs/PROTOCOL.md). Bearer token → Sensor; everything else is 401."""
 
 import gzip
-import ipaddress
 import json
 import logging
 import zlib
@@ -10,6 +9,9 @@ from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 from ninja.security import HttpBearer
+
+from apps.core.net import client_ip
+from apps.events import geo
 
 from .ingest import ingest_batch
 from .models import Sensor
@@ -77,23 +79,6 @@ class HeartbeatIn(Schema):
     detail: dict = {}
 
 
-def client_ip(request) -> str | None:
-    """The address the node is calling from. Behind the tunnel Cloudflare sets CF-Connecting-IP
-    and the ingress X-Forwarded-For; nothing else can reach this app, so they are trusted."""
-    for cand in (
-        request.headers.get("CF-Connecting-IP", ""),
-        request.headers.get("X-Forwarded-For", "").split(",")[0],
-        request.META.get("REMOTE_ADDR", ""),
-    ):
-        cand = cand.strip()
-        if cand:
-            try:
-                return str(ipaddress.ip_address(cand))
-            except ValueError:
-                continue
-    return None
-
-
 @router.post("/heartbeat", auth=auth)
 def heartbeat(request, hb: HeartbeatIn):
     sensor = request.auth
@@ -105,6 +90,10 @@ def heartbeat(request, hb: HeartbeatIn):
     fields = {"last_heartbeat": body, "last_seen_at": now, "public_ip": ip}
     if sensor.first_seen_at is None:
         fields["first_seen_at"] = now
+    if ip and (ip != sensor.public_ip or sensor.lat is None):
+        # Where the node is: the map draws arcs to it.
+        g = geo.lookup(ip)
+        fields.update(cc=g.get("cc", "") or "", city=g.get("city", "") or "", lat=g.get("lat"), lon=g.get("lon"))
     state = body.pop("state", "")[:32]
     detail = body.pop("detail", {})
     if state:

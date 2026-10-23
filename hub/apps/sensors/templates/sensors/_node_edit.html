@@ -1,0 +1,10 @@
+<h2>edit {{ node.name }}</h2>
+<form class="stack" hx-post="{% url 'node_edit' node.pk %}" hx-target="#created" hx-swap="innerHTML">
+  <label>Domains<textarea name="domains" rows="3" required>{{ node.domains|join:"
+" }}</textarea></label>
+  <label>Self IPs <small>— your own addresses or networks; their requests are stored with <code>self: true</code></small>
+    <input name="self_ips" value="{{ node.self_ips|join:", " }}"></label>
+  <label>ACME e-mail<input name="acme_email" type="email" value="{{ node.acme_email }}"></label>
+  <label>Notes<input name="notes" maxlength="2000" value="{{ node.notes }}"></label>
+  <button class="primary">save</button>
+</form>

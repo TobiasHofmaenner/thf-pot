@@ -5,7 +5,7 @@
   {% for n in nodes %}
     <tr>
       <td>{{ n.name }}{% if n.notes %}<br><small>{{ n.notes|truncatechars:60 }}</small>{% endif %}</td>
-      <td>{% for d in n.domains %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+      <td>{% for d in n.domains %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if n.self_ips %}<br><small class="mut">self: {{ n.self_ips|join:", " }}</small>{% endif %}</td>
       <td><code>{{ n.token_prefix }}…</code></td>
       <td>
         {% for p in n.phases %}<span class="phase {{ p.status }}" title="{{ p.note }}">{% if p.status == 'ok' %}✓{% elif p.status == 'fail' %}✗{% elif p.status == 'skip' %}–{% else %}·{% endif %} {{ p.name }}</span>{% endfor %}
@@ -16,6 +16,7 @@
       <td>{{ n.events_total }}</td>
       <td>{% if n.last_event_at %}{{ n.last_event_at|timesince }} ago{% else %}–{% endif %}</td>
       <td style="white-space:nowrap">
+        <button hx-get="{% url 'node_edit' n.pk %}" hx-target="#created" hx-swap="innerHTML">edit</button>
         <button hx-post="{% url 'node_rotate' n.pk %}" hx-target="#created" hx-swap="innerHTML"
                 hx-confirm="Rotate the token for {{ n.name }}? The running sensor will be locked out until it gets the new one.">rotate</button>
         <button hx-post="{% url 'node_toggle' n.pk %}" hx-target="#nodes" hx-swap="innerHTML"
