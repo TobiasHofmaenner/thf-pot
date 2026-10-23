@@ -107,8 +107,11 @@ setInterval(paintLive,200);
    that anchor, so a frame that runs mid-drag still lands on the right spot of the map. */
 const fxc=document.createElement('canvas');fxc.id='fx';fxc.className='leaflet-zoom-animated';const fx=fxc.getContext('2d');let fxOrigin=L.point(0,0);
 const shots=[],impacts=[];let fxOn=true,fxRaf=0;const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Own pane between the overlay pane (outlines, heat, live markers: 400) and the marker/tooltip panes (600/650):
+// the outlines' SVG arrives asynchronously and would otherwise be appended after the canvas and paint over it.
+const fxPane=map.createPane('fx');fxPane.style.zIndex=450;fxPane.style.pointerEvents='none';
 const FxLayer=L.Layer.extend({
- onAdd(m){m.getPane('overlayPane').appendChild(fxc);this._reset()},onRemove(){fxc.remove()},
+ onAdd(m){m.getPane('fx').appendChild(fxc);this._reset()},onRemove(){fxc.remove()},
  getEvents(){return{viewreset:this._reset,moveend:this._reset,zoomend:this._reset,resize:this._reset,zoomanim:this._zoomAnim}},
  _reset(){const r=map.getSize(),d=devicePixelRatio||1;if(fxc.width!==r.x*d||fxc.height!==r.y*d){fxc.width=r.x*d;fxc.height=r.y*d;fxc.style.width=r.x+'px';fxc.style.height=r.y+'px'}
   fx.setTransform(d,0,0,d,0,0);fxOrigin=map.containerPointToLayerPoint([0,0]);L.DomUtil.setTransform(fxc,fxOrigin,1);fxKick()},
