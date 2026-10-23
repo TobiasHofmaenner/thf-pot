@@ -1,30 +1,9 @@
-{% load static %}<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>thf-pot</title>
-<script src="{% static 'core/htmx.min.js' %}"></script>
-<style>
-  :root { color-scheme: light dark; --fg: #1b1f23; --bg: #fff; --mut: #6a737d; --ok: #1a7f37; --bad: #cf222e; }
-  @media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --bg: #0d1117; --mut: #8b949e; --ok: #3fb950; --bad: #f85149; } }
-  body { margin: 0; padding: 3rem 1.5rem; background: var(--bg); color: var(--fg);
-         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 36rem; margin: 0 auto; }
-  h1 { font-size: 3rem; margin: 0 0 1rem; letter-spacing: -.02em; }
-  table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  td { padding: .15rem 1rem .15rem 0; color: var(--mut); }
-  td:first-child { color: var(--fg); }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
-  small { color: var(--mut); }
-</style>
-</head>
-<body>
-<main>
+{% extends "core/base.html" %}
+{% block content %}
   <h1>hi</h1>
   <div hx-get="{% url 'status_fragment' %}" hx-trigger="load, every 10s" hx-swap="innerHTML">
     <small>checking the stack…</small>
   </div>
-</main>
-</body>
-</html>
+  <h2>sensors</h2>
+  <p><a href="{% url 'nodes' %}">nodes</a> — add a node, mint its token, copy the deploy snippets.</p>
+{% endblock %}

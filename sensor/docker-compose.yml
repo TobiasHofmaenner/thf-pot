@@ -5,7 +5,7 @@ services:
     container_name: thf-pot-sensor
     restart: unless-stopped
     environment:
-      HUB_URL: "https://pot.thfops.net"          # where events go
+      HUB_URL: "${HUB_URL:-https://pot.thfops.net}" # where events go
       SENSOR_TOKEN: "${SENSOR_TOKEN:?set SENSOR_TOKEN in .env}"
       DOMAINS: "${DOMAINS:?set DOMAINS in .env}" # comma-separated hostnames pointed at this node
       ACME_EMAIL: "${ACME_EMAIL:-}"              # optional, for certificate expiry notices

@@ -1,6 +1,7 @@
 # Local development only. The cluster deployment lives in thf-infra.
 x-hub: &hub
   build: .
+  image: thf-pot-hub:dev   # one image for all four services (otherwise compose tags one per service)
   environment: &hub-env
     DJANGO_DEBUG: "1"
     DJANGO_SECRET_KEY: dev-only

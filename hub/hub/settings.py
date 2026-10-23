@@ -37,8 +37,17 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "apps.core",
+    "apps.sensors",
+    "apps.events",
 ]
+
+# Sensor batches: up to 500 records / 1 MiB gzip per POST (docs/PROTOCOL.md); the ingress allows 8m.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 8 * 1024 * 1024
+# What the node page tells a new sensor to run and where to report.
+SENSOR_IMAGE = env("SENSOR_IMAGE", "ghcr.io/tobiashofmaenner/thf-pot-sensor:main")
+HUB_PUBLIC_URL = env("HUB_PUBLIC_URL")  # default: derived from the request
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

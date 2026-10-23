@@ -5,7 +5,7 @@
 //! local files keep growing. A day file is deleted only when it is older than RETAIN_DAYS *and*
 //! the cursor has moved past it, so an outage never costs evidence.
 
-use crate::{config::Config, store::Store};
+use crate::{config::Config, hub, status::Shared, store::Store};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -133,68 +133,7 @@ fn gzip(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(enc.finish()?)
 }
 
-async fn post_batch(cfg: &Config, client: &reqwest::Client, body: Vec<u8>) -> anyhow::Result<()> {
-    let gz = gzip(&body)?;
-    let resp = client
-        .post(format!("{}/api/v1/ingest", cfg.hub_url))
-        .bearer_auth(&cfg.sensor_token)
-        .header("Content-Type", "application/x-ndjson")
-        .header("Content-Encoding", "gzip")
-        .body(gz)
-        .send()
-        .await
-        .context("hub unreachable")?;
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("hub answered {status}: {}", text.chars().take(200).collect::<String>());
-    }
-    Ok(())
-}
-
-#[derive(Serialize)]
-struct Heartbeat<'a> {
-    ts: String,
-    version: &'static str,
-    domains: &'a [String],
-    cursor_file: &'a str,
-    cursor_offset: u64,
-    uptime_s: u64,
-}
-
-async fn heartbeat(cfg: &Config, client: &reqwest::Client, cur: &Cursor, started: Instant) -> anyhow::Result<()> {
-    let hb = Heartbeat {
-        ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        version: env!("CARGO_PKG_VERSION"),
-        domains: &cfg.domains,
-        cursor_file: &cur.file,
-        cursor_offset: cur.offset,
-        uptime_s: started.elapsed().as_secs(),
-    };
-    let resp = client
-        .post(format!("{}/api/v1/heartbeat", cfg.hub_url))
-        .bearer_auth(&cfg.sensor_token)
-        .json(&hb)
-        .send()
-        .await?;
-    if !resp.status().is_success() {
-        anyhow::bail!("heartbeat answered {}", resp.status());
-    }
-    Ok(())
-}
-
-pub async fn run(cfg: Arc<Config>, store: Arc<Store>) {
-    let client = match reqwest::Client::builder()
-        .user_agent(concat!("thf-pot-sensor/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(error = %e, "shipper disabled: cannot build http client");
-            return;
-        }
-    };
+pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, status: Shared) {
     let cursor_path = store.dir.join(".shipper-cursor.json");
     let mut cur = Cursor::load(&cursor_path);
     let started = Instant::now();
@@ -213,21 +152,24 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>) {
         match batch {
             Ok(Ok((Some((bytes, lines)), advanced))) => {
                 let new_offset = advanced.offset + bytes.len() as u64;
-                match post_batch(&cfg, &client, bytes).await {
-                    Ok(()) => {
-                        cur = Cursor { file: advanced.file, offset: new_offset };
-                        if let Err(e) = cur.save(&cursor_path) {
-                            warn!(error = %e, "cursor save failed");
+                match gzip(&bytes) {
+                    Ok(gz) => match hub.ingest(gz).await {
+                        Ok(()) => {
+                            cur = Cursor { file: advanced.file, offset: new_offset };
+                            if let Err(e) = cur.save(&cursor_path) {
+                                warn!(error = %e, "cursor save failed");
+                            }
+                            backoff = 1;
+                            info!(lines, file = %cur.file, offset = cur.offset, "shipped");
+                            pause = Duration::ZERO; // more may be waiting
                         }
-                        backoff = 1;
-                        info!(lines, file = %cur.file, offset = cur.offset, "shipped");
-                        pause = Duration::ZERO; // more may be waiting
-                    }
-                    Err(e) => {
-                        warn!(error = %e, retry_in_s = backoff, "ship failed");
-                        pause = Duration::from_secs(backoff);
-                        backoff = (backoff * 2).min(60);
-                    }
+                        Err(e) => {
+                            warn!(error = %e, retry_in_s = backoff, "ship failed");
+                            pause = Duration::from_secs(backoff);
+                            backoff = (backoff * 2).min(60);
+                        }
+                    },
+                    Err(e) => warn!(error = %e, "gzip failed"),
                 }
             }
             Ok(Ok((None, advanced))) => {
@@ -242,7 +184,7 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>) {
         // visible in the ship failures above and must not double the log noise.
         if last_hb.is_none_or(|t| t.elapsed() >= Duration::from_secs(cfg.heartbeat_secs)) {
             last_hb = Some(Instant::now());
-            if let Err(e) = heartbeat(&cfg, &client, &cur, started).await {
+            if let Err(e) = hub.heartbeat(&status.get(), (&cur.file, cur.offset), started.elapsed().as_secs()).await {
                 warn!(error = %e, "heartbeat failed");
             }
         }
@@ -251,6 +193,9 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>) {
             let (dir, c, days) = (store.dir.clone(), cur.clone(), cfg.retain_days);
             let _ = tokio::task::spawn_blocking(move || prune(&dir, &c, days)).await;
         }
-        tokio::time::sleep(pause).await;
+        // A state change (certificate obtained, renewal failed, …) is reported at once.
+        if tokio::time::timeout(pause, status.changed.notified()).await.is_ok() {
+            last_hb = None;
+        }
     }
 }

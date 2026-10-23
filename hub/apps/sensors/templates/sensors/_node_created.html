@@ -1,0 +1,17 @@
+<h2>{{ title }}</h2>
+<div class="notice">The token is shown <strong>once</strong>. The hub keeps only its hash; if it is lost, rotate it.</div>
+<p>token <button data-copy="tok">copy</button></p>
+<pre id="tok" class="token">{{ token }}</pre>
+
+<h2>option A — one command</h2>
+<div class="snippet"><button data-copy="run">copy</button><pre id="run">{{ s.docker_run }}</pre></div>
+
+<h2>option B — compose</h2>
+<p><small>Put both files in one directory, then <code>docker compose up -d</code>.</small></p>
+<p><code>.env</code> <button data-copy="env">copy</button></p>
+<div class="snippet"><pre id="env">{{ s.env }}</pre></div>
+<p><code>docker-compose.yml</code> <button data-copy="compose">copy</button></p>
+<div class="snippet"><pre id="compose">{{ s.compose }}</pre></div>
+
+<p><small>Open 80 and 443 to the node, point {{ node.domains|join:", " }} at it. Certificates are obtained automatically;
+events reach <code>{{ s.hub }}</code> within seconds, or wait on the node's disk if the hub is unreachable.</small></p>

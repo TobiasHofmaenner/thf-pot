@@ -14,8 +14,21 @@ data and is treated as untrusted on the hub.
 
 ## `POST /api/v1/heartbeat`
 
-Every 60 s regardless of traffic. JSON: `ts, version, domains, cursor_file, cursor_offset, uptime_s`.
+Every 60 s regardless of traffic, and immediately on every state change. JSON:
+`ts, version, domains, cursor_file, cursor_offset, uptime_s, state, detail`.
+Reply: `{"ok": true, "your_ip": "<address the hub saw the call from>"}`.
 A sensor whose heartbeat stops is itself a signal.
+
+`state` is the node's lifecycle, `detail` a free-form object the hub shows next to it:
+
+| state | meaning | detail |
+|---|---|---|
+| `starting` | process up, hub not yet consulted | – |
+| `dns_failed` | a domain does not resolve to `your_ip`; **the node does not open any port** and re-checks every 60 s | `public_ip`, `domains: {name: {ok, resolved: [...]}}`, `attempt` |
+| `dns_ok` | every domain resolves to the node | same |
+| `cert_pending` | listeners up, waiting for the CA (TLS-ALPN-01 on 443) | same |
+| `cert_error` | an ACME order or renewal failed; serving continues on whatever certificate exists | + `error` |
+| `ready` | certificate deployed, serving, shipping | + `certs: [domains]`; or `tls: disabled, dns: skipped` under `HTTP_ONLY` |
 
 ## Event record, schema v1
 

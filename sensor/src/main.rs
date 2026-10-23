@@ -3,14 +3,20 @@
 //! It answers HTTP(S) like a small PHP site, records every request as one JSON line on local disk,
 //! and ships those lines to the hub. It holds no detection logic: a captured node reveals nothing
 //! about what the hub looks for. Three environment variables deploy it: HUB_URL, SENSOR_TOKEN, DOMAINS.
+//!
+//! Start-up order: config → preflight (hub reachable, every domain resolves to this node) →
+//! listeners + certificates → shipping. The hub sees each phase as it happens.
 
 mod bundle;
 mod capture;
 mod config;
+mod hub;
 mod multipart;
+mod preflight;
 mod profiles;
 mod server;
 mod shipper;
+mod status;
 mod store;
 
 use std::sync::Arc;
@@ -33,6 +39,8 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&cfg.log_dir)?;
     let profiles = Arc::new(profiles::Profiles::load(&cfg)?);
     let store = Arc::new(store::Store::new(cfg.log_dir.clone()));
+    let hub = Arc::new(hub::Client::new(&cfg)?);
+    let status = status::new();
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -43,6 +51,14 @@ async fn main() -> anyhow::Result<()> {
         "thf-pot sensor starting"
     );
 
-    tokio::spawn(shipper::run(cfg.clone(), store.clone()));
-    server::serve(cfg, profiles, store).await
+    if cfg.http_only {
+        status.set("ready", serde_json::json!({ "tls": "disabled", "dns": "skipped" }));
+    } else {
+        // Blocks until every domain resolves to this node; nothing listens before that.
+        preflight::run(&cfg, &hub, &status).await;
+        status.set("cert_pending", status.get().detail);
+    }
+
+    tokio::spawn(shipper::run(cfg.clone(), store.clone(), hub.clone(), status.clone()));
+    server::serve(cfg, profiles, store, status).await
 }

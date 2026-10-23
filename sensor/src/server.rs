@@ -7,6 +7,7 @@ use crate::{
     config::Config,
     multipart,
     profiles::Profiles,
+    status::Shared,
     store::Store,
 };
 use axum::{
@@ -19,7 +20,7 @@ use axum::{
 use base64::Engine;
 use futures_util::StreamExt;
 use rand::RngCore;
-use rustls_acme::{caches::DirCache, AcmeConfig};
+use rustls_acme::{caches::DirCache, AcmeConfig, EventOk};
 use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tracing::{info, warn};
@@ -33,7 +34,7 @@ struct AppState {
     scheme: &'static str,
 }
 
-pub async fn serve(cfg: Arc<Config>, profiles: Arc<Profiles>, store: Arc<Store>) -> anyhow::Result<()> {
+pub async fn serve(cfg: Arc<Config>, profiles: Arc<Profiles>, store: Arc<Store>, status: Shared) -> anyhow::Result<()> {
     let make = |scheme: &'static str| {
         Router::new()
             .fallback(handle)
@@ -57,11 +58,28 @@ pub async fn serve(cfg: Arc<Config>, profiles: Arc<Profiles>, store: Arc<Store>)
     }
     let mut acme_state = acme.state();
     let acceptor = acme_state.axum_acceptor(acme_state.default_rustls_config());
+    let domains = cfg.domains.clone();
     tokio::spawn(async move {
+        // Certificate phase, reported to the hub: a deployed certificate (fresh or from the
+        // cache) means `ready`; any ACME failure, including a renewal later on, is `cert_error`.
         loop {
             match acme_state.next().await {
+                Some(Ok(ev @ (EventOk::DeployedCachedCert | EventOk::DeployedNewCert))) => {
+                    info!(event = ?ev, "acme: certificate deployed");
+                    let mut d = status.get().detail;
+                    d["certs"] = serde_json::json!(domains);
+                    if let Some(o) = d.as_object_mut() {
+                        o.remove("error");
+                    }
+                    status.set("ready", d);
+                }
                 Some(Ok(ev)) => info!(event = ?ev, "acme"),
-                Some(Err(e)) => warn!(error = %e, "acme"),
+                Some(Err(e)) => {
+                    warn!(error = %e, "acme");
+                    let mut d = status.get().detail;
+                    d["error"] = serde_json::json!(e.to_string().chars().take(300).collect::<String>());
+                    status.set("cert_error", d);
+                }
                 None => break,
             }
         }

@@ -1,0 +1,19 @@
+{% extends "core/base.html" %}
+{% block title %}nodes · thf-pot{% endblock %}
+{% block content %}
+  <h1>nodes</h1>
+  <section id="nodes" hx-get="{% url 'node_list' %}" hx-trigger="every 5s, nodes-changed from:body" hx-swap="innerHTML">
+    {% include "sensors/_node_list.html" %}
+  </section>
+
+  <h2>add node</h2>
+  <form class="stack" hx-post="{% url 'node_create' %}" hx-target="#created" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+    <label>Domains <small>— the hostnames pointed at the node; one per line or comma-separated</small>
+      <textarea name="domains" rows="3" required placeholder="files.example.org&#10;backup.example.org"></textarea></label>
+    <label>Name <small>— optional, defaults to the first domain</small><input name="name" maxlength="80"></label>
+    <label>ACME e-mail <small>— optional, certificate expiry notices</small><input name="acme_email" type="email"></label>
+    <label>Notes <small>— optional</small><input name="notes" maxlength="2000"></label>
+    <button class="primary">add node</button>
+  </form>
+  <div id="created"></div>
+{% endblock %}

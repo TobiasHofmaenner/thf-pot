@@ -8,9 +8,17 @@ through a worker.
 | Path | What |
 |---|---|
 | `/` | the page; htmx pulls `/_status` on load and every 10 s |
-| `/api/v1/status` | the same checks as JSON (`/api/v1/docs` for the OpenAPI page) |
+| `/nodes/` | sensor nodes: add one (mints its token, renders `docker run` / compose / `.env`), rotate, revoke; deploy phases refresh every 5 s |
+| `/api/v1/ingest` | sensor batches (bearer token; see `docs/PROTOCOL.md`) |
+| `/api/v1/heartbeat` | sensor state + the address the hub saw it from |
+| `/api/v1/status` | stack checks as JSON (`/api/v1/docs` for the OpenAPI page) |
 | `/healthz` | liveness, no dependencies |
 | `/readyz` | readiness: DB + cache, 503 when either is down |
+
+`manage.py add_node --domains a.example,b.example` does the same as the button from a shell.
+Tokens are stored as SHA-256 only. The two sensor endpoints must be reachable without the
+ingress basic auth (second Ingress in thf-infra); the hub derives the node's public address from
+`CF-Connecting-IP` / `X-Forwarded-For`, which only the ingress can set.
 
 ## Run locally
 

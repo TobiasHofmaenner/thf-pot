@@ -1,0 +1,30 @@
+{% if nodes %}
+<table>
+  <thead><tr><th>name</th><th>domains</th><th>token</th><th>deploy</th><th>version</th><th>events</th><th>last event</th><th></th></tr></thead>
+  <tbody>
+  {% for n in nodes %}
+    <tr>
+      <td>{{ n.name }}{% if n.notes %}<br><small>{{ n.notes|truncatechars:60 }}</small>{% endif %}</td>
+      <td>{% for d in n.domains %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+      <td><code>{{ n.token_prefix }}…</code></td>
+      <td>
+        {% for p in n.phases %}<span class="phase {{ p.status }}" title="{{ p.note }}">{% if p.status == 'ok' %}✓{% elif p.status == 'fail' %}✗{% elif p.status == 'skip' %}–{% else %}·{% endif %} {{ p.name }}</span>{% endfor %}
+        {% for p in n.phases %}{% if p.status == 'fail' and p.note %}<br><small class="bad">{{ p.name }}: {{ p.note }}</small>{% endif %}{% endfor %}
+        {% if n.is_active %}<br><small class="mut">{{ n.state }}{% if n.state_changed_at %} since {{ n.state_changed_at|timesince }} ago{% endif %}{% if n.public_ip %} · {{ n.public_ip }}{% endif %}</small>{% else %}<br><small class="bad">revoked</small>{% endif %}
+      </td>
+      <td><small>{{ n.version|default:"–" }}</small></td>
+      <td>{{ n.events_total }}</td>
+      <td>{% if n.last_event_at %}{{ n.last_event_at|timesince }} ago{% else %}–{% endif %}</td>
+      <td style="white-space:nowrap">
+        <button hx-post="{% url 'node_rotate' n.pk %}" hx-target="#created" hx-swap="innerHTML"
+                hx-confirm="Rotate the token for {{ n.name }}? The running sensor will be locked out until it gets the new one.">rotate</button>
+        <button hx-post="{% url 'node_toggle' n.pk %}" hx-target="#nodes" hx-swap="innerHTML"
+                {% if n.is_active %}hx-confirm="Revoke {{ n.name }}? Its batches will be refused until re-enabled."{% endif %}>{% if n.is_active %}revoke{% else %}enable{% endif %}</button>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="mut">No nodes yet.</p>
+{% endif %}

@@ -1,0 +1,66 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}thf-pot{% endblock %}</title>
+<script src="{% static 'core/htmx.min.js' %}"></script>
+<style>
+  :root { color-scheme: light dark; --fg: #1b1f23; --bg: #fff; --mut: #6a737d; --ok: #1a7f37; --bad: #cf222e;
+          --warn: #9a6700; --line: #d0d7de; --code: #f6f8fa; --acc: #0969da; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --bg: #0d1117; --mut: #8b949e; --ok: #3fb950;
+          --bad: #f85149; --warn: #d29922; --line: #30363d; --code: #161b22; --acc: #58a6ff; } }
+  body { margin: 0; padding: 0 1.5rem 3rem; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { max-width: 60rem; margin: 0 auto; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+  header a { color: var(--fg); text-decoration: none; margin-right: 1.25rem; }
+  header a.brand { font-weight: 700; }
+  header a:hover { color: var(--acc); }
+  main { max-width: 60rem; margin: 0 auto; padding-top: 1.5rem; }
+  h1 { font-size: 2rem; margin: 0 0 1rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.15rem; margin: 2rem 0 .75rem; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: .4rem .75rem .4rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 500; font-size: .85rem; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); } .mut { color: var(--mut); }
+  small { color: var(--mut); }
+  code, pre { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: .75rem 1rem;
+        overflow-x: auto; margin: 0; }
+  .snippet { position: relative; margin: .5rem 0 1.25rem; }
+  .snippet button { position: absolute; top: .4rem; right: .4rem; }
+  button { font: inherit; font-size: .85rem; padding: .25rem .6rem; border: 1px solid var(--line);
+           border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
+  button:hover { border-color: var(--acc); color: var(--acc); }
+  button.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+  form.stack label { display: block; margin: .75rem 0; }
+  form.stack input, form.stack textarea { display: block; width: 100%; max-width: 32rem; box-sizing: border-box;
+           margin-top: .25rem; padding: .4rem .5rem; font: inherit; background: var(--bg); color: var(--fg);
+           border: 1px solid var(--line); border-radius: 6px; }
+  .notice { border: 1px solid var(--line); border-left: 4px solid var(--warn); padding: .6rem 1rem; border-radius: 6px; margin: 1rem 0; }
+  .notice.error { border-left-color: var(--bad); }
+  .token { font-size: 1rem; word-break: break-all; }
+  .phase { display: inline-block; margin-right: .6rem; white-space: nowrap; }
+  .phase.ok { color: var(--ok); } .phase.fail { color: var(--bad); } .phase.pending, .phase.skip { color: var(--mut); }
+</style>
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<header>
+  <a class="brand" href="{% url 'index' %}">thf-pot</a>
+  <a href="{% url 'nodes' %}">nodes</a>
+  <a href="/api/v1/docs">api</a>
+</header>
+<main>{% block content %}{% endblock %}</main>
+<script>
+  // Copy buttons: <button data-copy="id-of-a-pre">copy</button>
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-copy]'); if (!b) return;
+    const text = document.getElementById(b.dataset.copy).textContent;
+    try { await navigator.clipboard.writeText(text); b.textContent = 'copied'; }
+    catch (_) { const r = document.createRange(); r.selectNodeContents(document.getElementById(b.dataset.copy));
+                getSelection().removeAllRanges(); getSelection().addRange(r); b.textContent = 'selected — press ctrl/cmd+c'; }
+    setTimeout(() => b.textContent = 'copy', 2000);
+  });
+</script>
+</body>
+</html>

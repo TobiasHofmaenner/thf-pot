@@ -19,6 +19,12 @@ EOF
 docker compose up -d
 ```
 
+Before it opens a port the node asks the hub which address it is calling from and checks that
+every name in `DOMAINS` resolves to it. If one does not, it reports `dns_failed` (with what the
+name actually resolved to), keeps every port closed, and re-checks every minute — fix the record
+and it carries on by itself. The hub's nodes page shows the phases live:
+`deployed → dns → certs → live`.
+
 Certificates are obtained and renewed automatically (TLS-ALPN-01 on 443; nothing else to open).
 Events land in the `data` volume as `events-YYYY-MM-DD.jsonl` (`docker compose exec` is not
 available in a scratch image; read them with `docker run --rm -v thf-pot_data:/d alpine cat /d/events-2026-10-23.jsonl`
