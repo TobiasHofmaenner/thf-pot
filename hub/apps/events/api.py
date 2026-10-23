@@ -66,16 +66,24 @@ def recent(request, n: int = 200, after: int | None = None):
 
 
 @router.get("/events/summary")
-def summary(request, hours: int = 168):
-    """Hourly buckets for the window: counts, geo points, sources, requested hosts, nodes."""
+def summary(request, hours: int = 168, labels: str | None = None):
+    """Hourly buckets for the window: counts, geo points, sources, requested hosts, nodes.
+
+    `flagged` means: carries one of the labels in `labels` (comma-separated). Without the parameter
+    it falls back to "any label or structural flag"; an empty parameter flags nothing."""
     hours = max(1, min(hours, MAX_HOURS))
     since = (timezone.now() - timedelta(hours=hours)).replace(minute=0, second=0, microsecond=0)
-    flagged_sql = "(cardinality(labels) > 0 OR flags::text[] && %s::text[])"
-    params = [list(Event.SUSPICIOUS_FLAGS)]
+    if labels is None:
+        flagged_sql = "(cardinality(labels) > 0 OR flags::text[] && %s::text[])"
+        params = [list(Event.SUSPICIOUS_FLAGS)]
+    else:
+        wanted = [x.strip() for x in labels.split(",") if x.strip()][:200]
+        flagged_sql = "(labels::text[] && %s::text[])" if wanted else "(%s::int = 1)"
+        params = [wanted] if wanted else [0]
     by_hour: dict[str, dict] = {}
 
     def bucket(h):
-        return by_hour.setdefault(h, {"n": 0, "flagged": 0, "geo": [], "ips": [], "host": [], "node": []})
+        return by_hour.setdefault(h, {"n": 0, "flagged": 0, "geo": [], "ips": [], "host": [], "node": [], "labels": []})
 
     with connection.cursor() as cur:
         cur.execute(
@@ -119,6 +127,14 @@ def summary(request, hours: int = 168):
         )
         for h, name, n, f in cur.fetchall():
             bucket(h)["node"].append([name, n, f])
+        # label counts per hour, so the picker can show how often each label occurred in the window
+        cur.execute(
+            """select to_char(date_trunc('hour', ts) at time zone 'UTC', 'YYYY-MM-DD"T"HH24') h, l, count(*)
+               from events_event, unnest(labels) l where ts >= %s group by 1, 2""",
+            [since],
+        )
+        for h, label, n in cur.fetchall():
+            bucket(h).setdefault("labels", []).append([label, n])
 
     nodes = {
         s.name: {"lat": s.lat, "lon": s.lon, "cc": s.cc, "city": s.city, "ip": s.public_ip, "active": s.is_active,

@@ -36,6 +36,14 @@ main{display:grid;grid-template-columns:minmax(0,2fr) minmax(320px,1fr);gap:12px
 .leaflet-tooltip-top:before{border-top-color:var(--line)}.leaflet-tooltip-bottom:before{border-bottom-color:var(--line)}.leaflet-tooltip-left:before{border-left-color:var(--line)}.leaflet-tooltip-right:before{border-right-color:var(--line)}
 #demo{display:none;position:absolute;top:8px;right:8px;z-index:700;background:#7f1d1d;color:#fff;font-size:11px;padding:2px 8px;border-radius:4px;letter-spacing:.06em}
 #chartwrap{padding:8px 12px 4px;height:220px}
+/* label picker for the persistent red dots */
+.flagpick{position:relative}.flagpick summary{cursor:pointer;list-style:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px;color:var(--muted)}.flagpick summary b{color:var(--ink)}
+.flagpick[open] summary{border-color:var(--accent)}
+.fpbody{position:absolute;z-index:800;top:calc(100% + 6px);left:0;min-width:min(520px,90vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;box-shadow:0 10px 40px rgba(0,0,0,.7)}
+.fptools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:8px}.fptools button{padding:3px 8px;font-size:12px}
+.fplist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 14px;max-height:50vh;overflow:auto;font-size:12.5px}
+.fplist label{display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}.fplist input{accent-color:#ff7b7b}
+.fplist .sev2{color:#ff7b7b}.fplist .sev1{color:#fbbf24}.fplist .sev0{color:var(--muted)}.fplist .n{color:var(--muted);margin-left:auto;font-variant-numeric:tabular-nums}
 #events{max-height:460px;overflow:auto;font-variant-numeric:tabular-nums}
 .ev{display:grid;grid-template-columns:62px 30px 128px 42px 1fr;gap:8px;padding:5px 12px;border-bottom:1px solid var(--line);font-size:12.5px;white-space:nowrap;overflow:hidden;border-left:3px solid transparent;cursor:pointer}
 .ev span{overflow:hidden;text-overflow:ellipsis}
@@ -57,12 +65,16 @@ footer{padding:14px 16px 28px;color:var(--muted);font-size:12px;line-height:1.6;
 <div class="controls">
 <label>window <select id="len"><option value="1">1 h</option><option value="6">6 h</option><option value="24" selected>24 h</option><option value="72">3 d</option><option value="168">7 d</option><option value="720">30 d</option></select></label>
 <label>node <select id="target"><option value="">all</option></select></label><label><input type="checkbox" id="fxon" checked> attack arcs</label>
+<details class="flagpick" id="flagpick"><summary>red dots: <b id="flagn">…</b></summary>
+ <div class="fpbody"><div class="fptools"><button type="button" data-fp="malicious">malicious rules</button><button type="button" data-fp="all">all</button><button type="button" data-fp="none">none</button>
+  <span class="stat">a location keeps a red dot while a request matching one of the ticked labels came from it; counts are for the window</span></div>
+  <div id="fplist" class="fplist"></div></div></details>
 <span id="range" class="stat">no data yet</span>
 </div>
 <main>
 <div style="display:grid;gap:12px;min-width:0">
  <div class="card"><h2>Requests by source location, selected window</h2><div id="map"><span id="demo">DEMO · synthetic arcs, not real traffic</span></div>
-  <div class="legend"><span><span class="sw" style="background:linear-gradient(90deg,#fde68a,#f59e0b,#9a3412)"></span>volume (sqrt-scaled)</span><span><span class="sw" style="background:var(--serious);border-radius:50%"></span>location with flagged requests</span><span><span class="sw" style="background:#7cc4ff;border-radius:50%;box-shadow:0 0 6px #7cc4ff"></span>live arrivals, brighter with volume, fading over 90 s</span><span><i style="background:#ff3b3b;box-shadow:0 0 6px #ff3b3b"></i>malicious</span><span><i style="background:#fbbf24"></i>suspicious</span><span><i style="background:#f8fafc"></i>our nodes</span><span class="stat">benign traffic is drawn faintly; repeats from one origin ride the same arc as a stream</span></div>
+  <div class="legend"><span><span class="sw" style="background:linear-gradient(90deg,#fde68a,#f59e0b,#9a3412)"></span>volume (sqrt-scaled)</span><span><span class="sw" style="background:var(--serious);border-radius:50%"></span>location with requests matching the ticked labels (“red dots” above)</span><span><span class="sw" style="background:#7cc4ff;border-radius:50%;box-shadow:0 0 6px #7cc4ff"></span>live arrivals, brighter with volume, fading over 90 s</span><span><i style="background:#ff3b3b;box-shadow:0 0 6px #ff3b3b"></i>malicious</span><span><i style="background:#fbbf24"></i>suspicious</span><span><i style="background:#f8fafc"></i>our nodes</span><span class="stat">benign traffic is drawn faintly; repeats from one origin ride the same arc as a stream</span></div>
   <div class="slegend" id="slegend"></div></div>
  <div class="card"><h2>Live events, newest first</h2><div id="events"></div></div>
  <div class="card"><h2>Top sources in window</h2><table><thead><tr><th>IP</th><th>country</th><th class="n">requests</th><th class="n">flagged</th></tr></thead><tbody id="ips"></tbody></table></div>
@@ -88,7 +100,23 @@ map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>').
 const heat=L.heatLayer([],{radius:22,blur:18,minOpacity:.35,max:1,gradient:{.2:'#fde68a',.55:'#f59e0b',1:'#9a3412'}}).addTo(map);
 const flagLayer=L.layerGroup().addTo(map);
 const liveLayer=L.layerGroup().addTo(map);const live=new Map();const IMAX=8,TAU=30000;
-const isFlag=e=>e.sev==='malicious'||e.sev==='suspicious';
+/* Which labels earn a location its persistent red dot. Chosen on the page, remembered in this browser,
+   defaulting to the malicious-severity rules. The summary is asked for the same set, so the heat, the
+   red dots, the ⚠ columns and the red bars all agree. */
+let RULES=[];const FLAGS=new Set();const FKEY='thf-pot.flag-labels';
+const isFlag=e=>(e.labels||[]).some(l=>FLAGS.has(l));
+function fpSave(){try{localStorage.setItem(FKEY,JSON.stringify([...FLAGS]))}catch(_){}}
+function fpRender(){const hits=new Map();if(S){for(const h of S.hours)for(const [l,c] of (S.by_hour[h].labels||[]))hits.set(l,(hits.get(l)||0)+c)}
+ $('fplist').innerHTML=RULES.map(r=>`<label title="${esc(r.title||'')}"><input type="checkbox" value="${esc(r.name)}"${FLAGS.has(r.name)?' checked':''}><span class="sev${r.severity}">${esc(r.name)}</span><span class="n">${hits.get(r.name)||0}</span></label>`).join('');
+ $('flagn').textContent=FLAGS.size+' of '+RULES.length+' labels'}
+async function fpInit(){try{RULES=await (await fetch('/api/v1/rules',{cache:'no-store'})).json()}catch(e){RULES=[]}
+ let saved=null;try{saved=JSON.parse(localStorage.getItem(FKEY)||'null')}catch(_){}
+ const names=new Set(RULES.map(r=>r.name));
+ if(Array.isArray(saved))saved.filter(l=>names.has(l)).forEach(l=>FLAGS.add(l));else RULES.filter(r=>r.severity===2).forEach(r=>FLAGS.add(r.name));
+ fpRender();
+ $('fplist').addEventListener('change',e=>{if(e.target.type!=='checkbox')return;e.target.checked?FLAGS.add(e.target.value):FLAGS.delete(e.target.value);fpSave();fpRender();refresh()});
+ document.querySelectorAll('[data-fp]').forEach(b=>b.onclick=()=>{FLAGS.clear();if(b.dataset.fp==='all')RULES.forEach(r=>FLAGS.add(r.name));if(b.dataset.fp==='malicious')RULES.filter(r=>r.severity===2).forEach(r=>FLAGS.add(r.name));fpSave();fpRender();refresh()});
+ document.addEventListener('click',e=>{const d=$('flagpick');if(d.open&&!d.contains(e.target))d.open=false})}
 function liveHit(e){if(e.lat==null)return;const k=e.lat.toFixed(1)+','+e.lon.toFixed(1);const flag=isFlag(e);let s=live.get(k);
  if(!s){s={i:0,t:Date.now(),flag:false,cc:e.cc,city:e.city,m:L.circleMarker([e.lat,e.lon],{radius:5,weight:1,color:'#cfe9ff',opacity:.9,fillColor:'#7cc4ff',fillOpacity:.7,interactive:true}).addTo(liveLayer)};live.set(k,s);
   if(live.size>400){const old=[...live.entries()].sort((a,b)=>a[1].t-b[1].t)[0];liveLayer.removeLayer(old[1].m);live.delete(old[0])}}
@@ -236,7 +264,7 @@ const chart=new Chart($('chart'),{type:'bar',data:{labels:[],datasets:[{label:'r
  plugins:{legend:{labels:{color:'#cbd5e1',boxWidth:12}},tooltip:{callbacks:{title:items=>fmtH(items[0].label)+' UTC'}}}}});
 function applySummary(s){S=s;chart.data.labels=s.hours;chart.data.datasets[0].data=s.hours.map(h=>s.by_hour[h].n);chart.data.datasets[1].data=s.hours.map(h=>s.by_hour[h].flagged);
  $('updated').textContent='updated '+s.generated.slice(11,19)+' UTC';render();}
-async function refresh(){try{const d=await (await fetch(API+'/summary?hours='+(+$('len').value),{cache:'no-store'})).json();applySummary(d)}catch(e){console.warn(e)}}
+async function refresh(){try{const d=await (await fetch(API+'/summary?hours='+(+$('len').value)+'&labels='+encodeURIComponent([...FLAGS].join(',')),{cache:'no-store'})).json();applySummary(d);fpRender()}catch(e){console.warn(e)}}
 $('len').onchange=refresh;$('target').onchange=()=>{refill()};
 // live events
 const evs=$('events');
@@ -250,6 +278,7 @@ function liveMerge(e){if(!S)return;const h=e.ts.slice(0,13),f=isFlag(e)?1:0;let 
  let ip=b.ips.find(x=>x[0]===e.src);ip?(ip[1]++,ip[3]+=f):b.ips.push([e.src,1,e.cc,f]);
  b.host=b.host||[];let hh=b.host.find(x=>x[0]===e.host);hh?(hh[1]++,hh[2]+=f):b.host.push([e.host,1,f]);
  b.node=b.node||[];let ss=b.node.find(x=>x[0]===e.node);ss?(ss[1]++,ss[2]+=f):b.node.push([e.node,1,f]);
+ b.labels=b.labels||[];for(const l of (e.labels||[])){const x=b.labels.find(y=>y[0]===l);x?x[1]++:b.labels.push([l,1])}
  render();}
 /* Live feed by polling: every 2 s ask for everything after the newest id we have. Cheap for the server, immune
    to the suspended-tab and connection-budget problems a long-lived stream had, and never silently stale. */
@@ -310,5 +339,5 @@ function renderEvent(){const r=dcur;if(!r)return;$('dtitle').textContent=`${r.me
   const text=dcollapse?squash(r.body):r.body;F.append(hl(r.multipart&&r.multipart.boundary?tokMultipart(text,r.multipart.boundary):tokRun(text,x=>tokData(x,r.content_type))))}
  else F.append(el('div','stat','no body'));
  dcontent.replaceChildren(F)}
-initEvents();refresh();setInterval(refresh,60000);
+fpInit().then(()=>{initEvents();refresh();setInterval(refresh,60000)});
 </script></body></html>

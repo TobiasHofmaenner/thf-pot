@@ -80,6 +80,22 @@ class EventsApiTests(TestCase):
         self.assertEqual(b["node"], [["s1", 3, 1]])
         self.assertEqual(d["nodes"]["s1"]["lat"], 1.3)
 
+    def test_summary_flagged_follows_selected_labels(self):
+        mk_event(self.s, lat=52.5, lon=13.4, labels=["crawler"], severity=0)
+        mk_event(self.s, lat=52.5, lon=13.4, labels=["path traversal"], severity=2)
+        mk_event(self.s, lat=52.5, lon=13.4, flags=["mp:preamble"])
+        h = lambda d: d["by_hour"][d["hours"][0]]  # noqa: E731
+        d = self.client.get("/api/v1/events/summary?hours=24").json()  # no parameter: old heuristic
+        self.assertEqual(h(d)["flagged"], 3)
+        d = self.client.get("/api/v1/events/summary?hours=24&labels=path%20traversal").json()
+        self.assertEqual(h(d)["flagged"], 1)
+        self.assertEqual(h(d)["geo"][0][5], 1)
+        self.assertEqual(sorted(h(d)["labels"]), [["crawler", 1], ["path traversal", 1]])
+        d = self.client.get("/api/v1/events/summary?hours=24&labels=crawler,path%20traversal").json()
+        self.assertEqual(h(d)["flagged"], 2)
+        d = self.client.get("/api/v1/events/summary?hours=24&labels=").json()  # explicitly nothing
+        self.assertEqual(h(d)["flagged"], 0)
+
     def test_detail_returns_body_as_text_and_404_for_unknown(self):
         e = mk_event(self.s, body_sample=b"a=1&b=\xff", multipart={"boundary": "x", "parts": 2})
         d = self.client.get(f"/api/v1/events/{e.id}").json()
