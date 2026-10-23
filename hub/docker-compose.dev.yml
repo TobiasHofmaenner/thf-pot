@@ -1,0 +1,39 @@
+# Local development only. The cluster deployment lives in thf-infra.
+x-hub: &hub
+  build: .
+  environment: &hub-env
+    DJANGO_DEBUG: "1"
+    DJANGO_SECRET_KEY: dev-only
+    POSTGRES_HOST: db
+    POSTGRES_DB: thf_pot
+    POSTGRES_USER: thf_pot
+    POSTGRES_PASSWORD: thf_pot
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    CACHE_LOCATION: redis://redis:6379/2
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: thf_pot, POSTGRES_USER: thf_pot, POSTGRES_PASSWORD: thf_pot }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U thf_pot"], interval: 2s, retries: 15 }
+  redis:
+    image: redis:7-alpine
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 2s, retries: 15 }
+  migrate:
+    <<: *hub
+    command: python manage.py migrate --noinput
+  web:
+    <<: *hub
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+  worker:
+    <<: *hub
+    command: celery -A hub worker --loglevel=info --concurrency=1
+  beat:
+    <<: *hub
+    command: celery -A hub beat --loglevel=info --schedule=/tmp/celerybeat-schedule

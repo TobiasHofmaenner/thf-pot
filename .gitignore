@@ -2,3 +2,6 @@ target/
 **/data/
 .env
 *.tmp
+__pycache__/
+*.pyc
+hub/staticfiles/

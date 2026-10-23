@@ -1,0 +1,11 @@
+<table>
+  {% for name, c in s.items %}{% if name != "version" %}
+  <tr>
+    <td>{{ name }}</td>
+    <td class="{% if c.ok %}ok{% else %}bad{% endif %}">{% if c.ok %}ok{% else %}down{% endif %}</td>
+    <td>{{ c.ms }} ms</td>
+    <td>{{ c.error|default:"" }}</td>
+  </tr>
+  {% endif %}{% endfor %}
+</table>
+<small>hub {{ s.version }}</small>
