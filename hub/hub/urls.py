@@ -10,6 +10,7 @@ urlpatterns = [
     path("_status", views.status_fragment, name="status_fragment"),
     path("healthz", views.healthz, name="healthz"),
     path("readyz", views.readyz, name="readyz"),
-    path("nodes/", include("apps.sensors.urls")),
+    path("nodes/", include("apps.nodes.urls")),
+    path("rules/", include("apps.rules.urls")),
     path("api/v1/", api.urls),
 ]

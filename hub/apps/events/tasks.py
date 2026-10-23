@@ -30,7 +30,12 @@ def enrich(ids) -> int:
 
 @shared_task(ignore_result=True)
 def enrich_events(ids: list[int]):
-    return enrich(ids)
+    """Per ingested batch: geo first (rules may use cc), then the rule engine."""
+    n = enrich(ids)
+    from apps.rules import engine
+
+    engine.classify_events(ids)
+    return n
 
 
 @shared_task(ignore_result=True)

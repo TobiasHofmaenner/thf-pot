@@ -1,4 +1,4 @@
-"""One row per request a sensor saw. Columns map 1:1 onto sensor schema v1 (docs/PROTOCOL.md);
+"""One row per request a node saw. Columns map 1:1 onto node schema v1 (docs/PROTOCOL.md);
 anything the hub does not know yet lands in `extra`. Rows are evidence: the ingest path only
 inserts, and the only columns ever updated later are the analysis ones (labels, severity)."""
 
@@ -8,7 +8,7 @@ from django.db import models
 
 
 class Event(models.Model):
-    sensor = models.ForeignKey("sensors.Sensor", on_delete=models.PROTECT, related_name="events")
+    node = models.ForeignKey("nodes.Node", on_delete=models.PROTECT, related_name="events")
     ulid = models.CharField(max_length=26)
     ts = models.DateTimeField(db_index=True)
     received_at = models.DateTimeField(auto_now_add=True)
@@ -39,9 +39,10 @@ class Event(models.Model):
     resp = models.JSONField(default=dict)
     dur_ms = models.IntegerField(default=0)
 
-    # Analysis layer (hub-owned; the only mutable columns).
+    # Analysis layer (hub-owned; the only mutable columns). Filled by the rule engine in the worker.
     labels = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     severity = models.SmallIntegerField(null=True, blank=True)
+    classified_at = models.DateTimeField(null=True, blank=True)
 
     # Geo + ASN, filled in by the worker after ingest (DB-IP Lite). geo_at null = not yet done.
     cc = models.CharField(max_length=2, blank=True, default="")
@@ -66,12 +67,13 @@ class Event(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["sensor", "ulid"], name="uniq_event_sensor_ulid"),
+            models.UniqueConstraint(fields=["node", "ulid"], name="uniq_event_node_ulid"),
         ]
         indexes = [
             models.Index(fields=["src", "ts"], name="event_src_ts"),
-            models.Index(fields=["sensor", "ts"], name="event_sensor_ts"),
+            models.Index(fields=["node", "ts"], name="event_node_ts"),
             models.Index(fields=["geo_at"], name="event_geo_at"),
+            models.Index(fields=["classified_at"], name="event_classified_at"),
             GinIndex(fields=["flags"], name="event_flags_gin"),
             GinIndex(fields=["labels"], name="event_labels_gin"),
         ]

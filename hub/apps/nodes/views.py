@@ -9,7 +9,7 @@ from django.views.decorators.http import require_POST
 from apps.core.net import client_ip
 
 from . import snippets
-from .models import Sensor
+from .models import Node
 
 _HOST = re.compile(r"^(?=.{1,253}$)(?!-)([a-z0-9-]{1,63}(?<!-)\.)+[a-z0-9-]{2,63}$")
 
@@ -49,94 +49,94 @@ def parse_self_ips(text: str) -> list[str]:
 
 
 def _list(request, status=200):
-    return render(request, "sensors/_node_list.html", {"nodes": Sensor.objects.all()}, status=status)
+    return render(request, "nodes/_node_list.html", {"nodes": Node.objects.all()}, status=status)
 
 
 def nodes(request):
-    return render(request, "sensors/nodes.html", {"nodes": Sensor.objects.all(), "your_ip": client_ip(request) or ""})
+    return render(request, "nodes/nodes.html", {"nodes": Node.objects.all(), "your_ip": client_ip(request) or ""})
 
 
 def node_list(request):
     return _list(request)
 
 
-def _created(request, sensor, token, title):
+def _created(request, node, token, title):
     resp = render(
         request,
-        "sensors/_node_created.html",
-        {"node": sensor, "token": token, "title": title, "s": snippets.build(sensor, token, snippets.hub_url(request))},
+        "nodes/_node_created.html",
+        {"node": node, "token": token, "title": title, "s": snippets.build(node, token, snippets.hub_url(request))},
     )
     resp["HX-Trigger"] = "nodes-changed"
     return resp
 
 
 def _error(request, msg):
-    return render(request, "sensors/_node_error.html", {"msg": msg}, status=200)
+    return render(request, "nodes/_node_error.html", {"msg": msg}, status=200)
 
 
-def _apply_fields(sensor, post):
+def _apply_fields(node, post):
     """Shared by create and edit. Raises ValueError with a message for the page."""
     domains = parse_domains(post.get("domains", ""))
     if not domains:
         raise ValueError("at least one domain is required")
-    sensor.domains = domains
-    sensor.self_ips = parse_self_ips(post.get("self_ips", ""))
-    sensor.acme_email = (post.get("acme_email") or "").strip()[:254]
-    sensor.notes = (post.get("notes") or "").strip()[:2000]
+    node.domains = domains
+    node.self_ips = parse_self_ips(post.get("self_ips", ""))
+    node.acme_email = (post.get("acme_email") or "").strip()[:254]
+    node.notes = (post.get("notes") or "").strip()[:2000]
 
 
 @require_POST
 def node_create(request):
-    sensor = Sensor()
+    node = Node()
     try:
-        _apply_fields(sensor, request.POST)
+        _apply_fields(node, request.POST)
     except ValueError as e:
         return _error(request, str(e))
-    sensor.name = (request.POST.get("name") or sensor.domains[0]).strip()[:80]
-    if Sensor.objects.filter(name=sensor.name).exists():
-        return _error(request, f"a node named {sensor.name!r} already exists")
-    token = sensor.mint_token()
-    sensor.save()
-    return _created(request, sensor, token, f"node {sensor.name} added")
+    node.name = (request.POST.get("name") or node.domains[0]).strip()[:80]
+    if Node.objects.filter(name=node.name).exists():
+        return _error(request, f"a node named {node.name!r} already exists")
+    token = node.mint_token()
+    node.save()
+    return _created(request, node, token, f"node {node.name} added")
 
 
 def node_edit(request, pk):
-    sensor = get_object_or_404(Sensor, pk=pk)
+    node = get_object_or_404(Node, pk=pk)
     if request.method == "POST":
         try:
-            _apply_fields(sensor, request.POST)
+            _apply_fields(node, request.POST)
         except ValueError as e:
             return _error(request, str(e))
-        sensor.save(update_fields=["domains", "self_ips", "acme_email", "notes"])
-        env = [line for line in snippets.env_lines(sensor, "<unchanged>", snippets.hub_url(request)) if not line.startswith("#")]
-        resp = render(request, "sensors/_node_edited.html", {"node": sensor, "env": "\n".join(env)})
+        node.save(update_fields=["domains", "self_ips", "acme_email", "notes"])
+        env = [line for line in snippets.env_lines(node, "<unchanged>", snippets.hub_url(request)) if not line.startswith("#")]
+        resp = render(request, "nodes/_node_edited.html", {"node": node, "env": "\n".join(env)})
         resp["HX-Trigger"] = "nodes-changed"
         return resp
-    return render(request, "sensors/_node_edit.html", {"node": sensor})
+    return render(request, "nodes/_node_edit.html", {"node": node})
 
 
 @require_POST
 def node_rotate(request, pk):
-    sensor = get_object_or_404(Sensor, pk=pk)
-    token = sensor.mint_token()
-    sensor.token_rotated_at = timezone.now()
-    sensor.save(update_fields=["token_sha256", "token_prefix", "token_rotated_at"])
-    return _created(request, sensor, token, f"token for {sensor.name} rotated — the old one stops working now")
+    node = get_object_or_404(Node, pk=pk)
+    token = node.mint_token()
+    node.token_rotated_at = timezone.now()
+    node.save(update_fields=["token_sha256", "token_prefix", "token_rotated_at"])
+    return _created(request, node, token, f"token for {node.name} rotated — the old one stops working now")
 
 
 @require_POST
 def node_toggle(request, pk):
-    sensor = get_object_or_404(Sensor, pk=pk)
-    sensor.is_active = not sensor.is_active
-    sensor.save(update_fields=["is_active"])
+    node = get_object_or_404(Node, pk=pk)
+    node.is_active = not node.is_active
+    node.save(update_fields=["is_active"])
     return _list(request)
 
 
 @require_POST
 def node_delete(request, pk):
     """Only a revoked node that never produced an event can go; anything with events is evidence."""
-    sensor = get_object_or_404(Sensor, pk=pk)
-    if sensor.is_active or sensor.events.exists():
+    node = get_object_or_404(Node, pk=pk)
+    if node.is_active or node.events.exists():
         return HttpResponseBadRequest("only a revoked node without events can be deleted")
-    sensor.delete()
+    node.delete()
     return _list(request)

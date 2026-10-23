@@ -2,13 +2,13 @@
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.sensors import snippets
-from apps.sensors.models import Sensor
-from apps.sensors.views import parse_domains
+from apps.nodes import snippets
+from apps.nodes.models import Node
+from apps.nodes.views import parse_domains
 
 
 class Command(BaseCommand):
-    help = "Create a sensor node and print its token"
+    help = "Create a node node and print its token"
 
     def add_arguments(self, parser):
         parser.add_argument("--domains", required=True, help="comma-separated hostnames the node serves")
@@ -22,11 +22,11 @@ class Command(BaseCommand):
             raise CommandError(str(e)) from e
         if not domains:
             raise CommandError("no domains")
-        sensor = Sensor(name=opts["name"] or domains[0], domains=domains)
-        token = sensor.mint_token()
-        sensor.save()
+        node = Node(name=opts["name"] or domains[0], domains=domains)
+        token = node.mint_token()
+        node.save()
         from django.conf import settings
 
         hub = opts["hub"] or settings.HUB_PUBLIC_URL or "https://pot.thfops.net"
-        s = snippets.build(sensor, token, hub)
-        self.stdout.write(f"node {sensor.name} (id {sensor.pk}) created\n\n# .env\n{s['env']}\n{s['docker_run']}\n")
+        s = snippets.build(node, token, hub)
+        self.stdout.write(f"node {node.name} (id {node.pk}) created\n\n# .env\n{s['env']}\n{s['docker_run']}\n")

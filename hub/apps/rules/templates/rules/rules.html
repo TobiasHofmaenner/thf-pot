@@ -1,0 +1,49 @@
+{% extends "core/base.html" %}
+{% block title %}rules · thf-pot{% endblock %}
+{% block content %}
+<style>
+  .two { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+  @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+  .origin { font-size: .75rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 .35rem; color: var(--mut); }
+  .origin.ai { border-style: dashed; color: var(--acc); } .origin.local { color: var(--mut); } .origin.api { color: var(--warn); } .origin.human { color: var(--fg); }
+  .sev0 { color: var(--mut); } .sev1 { color: var(--warn); } .sev2 { color: var(--bad); }
+  textarea.yaml { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 16rem; max-width: none; tab-size: 2; }
+  .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: end; }
+  .row label { flex: 1 1 10rem; margin: .5rem 0; }
+  .sample td { padding: .15rem .5rem .15rem 0; font-size: .85rem; }
+  tr.sel td { background: color-mix(in srgb, var(--acc) 12%, transparent); }
+  details.fields summary { cursor: pointer; color: var(--mut); }
+  details.fields table td { font-size: .85rem; }
+</style>
+<h1>rules</h1>
+<p class="mut">Sigma-style detections over each request. A match labels the event and sets its severity on the map.
+Rules whose fields a WAF can see export as ModSecurity/Coraza or Cloudflare expressions:
+<a href="{% url 'rules_export' %}?format=modsec&mode=detect">modsec (detect)</a> ·
+<a href="{% url 'rules_export' %}?format=modsec&mode=block">modsec (block)</a> ·
+<a href="{% url 'rules_export' %}?format=cloudflare">cloudflare</a>.</p>
+<div class="two">
+  <div>
+    <p><button class="primary" hx-get="{% url 'rule_new' %}" hx-target="#editor" hx-swap="innerHTML">new rule</button></p>
+    <section id="rules" hx-get="{% url 'rule_list' %}" hx-trigger="rules-changed from:body" hx-swap="innerHTML">
+      {% include "rules/_rule_list.html" %}
+    </section>
+    <details class="fields"><summary>fields a rule can use</summary>
+      <table><thead><tr><th>field</th><th>type</th><th>meaning</th><th>modsec</th><th>cloudflare</th></tr></thead><tbody>
+      {% for k, f in fields.items %}<tr><td><code>{{ k }}</code></td><td>{{ f.kind }}</td><td>{{ f.doc }}</td><td><code>{{ f.modsec|default:"–" }}</code></td><td><code>{{ f.cf|default:"–" }}</code></td></tr>{% endfor %}
+      <tr><td><code>header.&lt;name&gt;</code></td><td>str</td><td>any request header</td><td><code>REQUEST_HEADERS:&lt;name&gt;</code></td><td><code>http.request.headers["&lt;name&gt;"][0]</code></td></tr>
+      </tbody></table>
+      <p class="mut"><small>Modifiers: <code>|contains |startswith |endswith |re |re|i |all |cased |gt |gte |lt |lte</code>. A list is OR (AND with <code>|all</code>); keys in one map are AND; a selection as a list of maps is OR.
+      Condition: <code>a and not b</code>, <code>1 of sel*</code>, <code>all of them</code>.</small></p>
+    </details>
+  </div>
+  <div id="editor"><p class="mut">Pick a rule, or create one.</p></div>
+</div>
+<script>
+  // Tab inserts two spaces in the YAML editor instead of leaving the field.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || !e.target.classList.contains('yaml')) return;
+    e.preventDefault(); const t = e.target, s = t.selectionStart;
+    t.value = t.value.slice(0, s) + '  ' + t.value.slice(t.selectionEnd); t.selectionStart = t.selectionEnd = s + 2;
+  });
+</script>
+{% endblock %}

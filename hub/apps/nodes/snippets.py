@@ -4,7 +4,7 @@ import ipaddress
 
 from django.conf import settings
 
-# The sensor replaces its own default (RFC 1918 + loopback) when SELF_NETS is set, so keep those.
+# The node replaces its own default (RFC 1918 + loopback) when SELF_NETS is set, so keep those.
 DEFAULT_SELF_NETS = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
 
 
@@ -13,7 +13,7 @@ def hub_url(request) -> str:
 
 
 def split_self(entries) -> tuple[str, str]:
-    """Plain addresses go to SELF_IPS, networks to SELF_NETS (on top of the sensor's defaults)."""
+    """Plain addresses go to SELF_IPS, networks to SELF_NETS (on top of the node's defaults)."""
     ips, nets = [], []
     for s in entries or []:
         try:
@@ -24,10 +24,10 @@ def split_self(entries) -> tuple[str, str]:
     return ",".join(ips), (DEFAULT_SELF_NETS + "," + ",".join(nets)) if nets else ""
 
 
-def env_lines(sensor, token: str, hub: str) -> list[str]:
-    self_ips, self_nets = split_self(sensor.self_ips)
-    lines = [f"HUB_URL={hub}", f"SENSOR_TOKEN={token}", f"DOMAINS={','.join(sensor.domains)}"]
-    lines.append(f"ACME_EMAIL={sensor.acme_email}" if sensor.acme_email else "# ACME_EMAIL=you@example.org")
+def env_lines(node, token: str, hub: str) -> list[str]:
+    self_ips, self_nets = split_self(node.self_ips)
+    lines = [f"HUB_URL={hub}", f"SENSOR_TOKEN={token}", f"DOMAINS={','.join(node.domains)}"]
+    lines.append(f"ACME_EMAIL={node.acme_email}" if node.acme_email else "# ACME_EMAIL=you@example.org")
     if self_ips:
         lines.append(f"SELF_IPS={self_ips}")
     if self_nets:
@@ -35,10 +35,10 @@ def env_lines(sensor, token: str, hub: str) -> list[str]:
     return lines
 
 
-def build(sensor, token: str, hub: str) -> dict:
+def build(node, token: str, hub: str) -> dict:
     image = settings.SENSOR_IMAGE
-    env = env_lines(sensor, token, hub)
-    run_lines = ["docker run -d --name thf-pot-sensor --restart unless-stopped"]
+    env = env_lines(node, token, hub)
+    run_lines = ["docker run -d --name thf-pot-node --restart unless-stopped"]
     run_lines += [f"  -e {line}" for line in env if not line.startswith("#")]
     run_lines += [
         "  -p 80:8080 -p 443:8443 -v thf-pot-data:/data",
@@ -48,9 +48,9 @@ def build(sensor, token: str, hub: str) -> dict:
     docker_run = " \\\n".join(run_lines)
 
     compose = f"""services:
-  sensor:
+  node:
     image: {image}
-    container_name: thf-pot-sensor
+    container_name: thf-pot-node
     restart: unless-stopped
     env_file: .env
     ports:

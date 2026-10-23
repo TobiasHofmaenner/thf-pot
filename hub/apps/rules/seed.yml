@@ -1,0 +1,344 @@
+# The signatures the fleet ran before the hub existed (honeypot/sigs.py), as Sigma detections.
+# origin: local. Loaded by a data migration; a rule whose origin is still `local` is updated in
+# place, one that a human changed to another origin is left alone.
+- name: PHP2Shell
+  title: PHP2Shell multipart / upload-progress attempt
+  severity: 2
+  cve: [CVE-2026-109618]
+  tags: [php, multipart, structural]
+  description: >
+    Judged by framing and size, never by what the bytes claim. Five structural flags describe framing only a
+    memory-corruption probe produces; the upload-progress field alone is an ordinary PHP feature and needs a
+    size or framing signal to corroborate it.
+  detection: |
+    structural:
+      flags|contains: [mp:excessive_part_headers, mp:many_empty_file_parts, mp:deep_nesting, mp:huge_part_count]
+    progress:
+      flags|contains: mp:upload_progress_field
+    bulk_size:
+      read_len|gt: 16384
+    bulk_run:
+      body|re: '(.)\1{4095,}'
+    bulk_preamble:
+      mp.preamble_len|gt: 64
+    condition: structural or (progress and (bulk_size or bulk_run or bulk_preamble))
+- name: php2shell branding only
+  title: Names the php2shell campaign in its boundary or user-agent while the request lacks the exploit's framing
+  severity: 1
+  tags: [php, branding]
+  suppressed_by: [PHP2Shell]
+  detection: |
+    brand:
+      - mp.boundary|re|i: 'B7kQpoc61[89]|php2shell|(?:^|[^A-Za-z0-9])p2s[A-Za-z0-9]{6,}'
+      - content_type|re|i: 'B7kQpoc61[89]|php2shell|(?:^|[^A-Za-z0-9])p2s[A-Za-z0-9]{6,}'
+      - ua|re|i: 'B7kQpoc61[89]|php2shell|(?:^|[^A-Za-z0-9])p2s[A-Za-z0-9]{6,}'
+      - target|re|i: 'B7kQpoc61[89]|php2shell|(?:^|[^A-Za-z0-9])p2s[A-Za-z0-9]{6,}'
+    condition: brand
+- name: oversized body
+  title: Request body far larger than scanners normally send; judged by size alone
+  severity: 1
+  tags: [structural]
+  detection: |
+    big:
+      read_len|gt: 16384
+    condition: big
+- name: inspection-window evasion
+  title: Multipart preamble padded to an exact power of two, sized to push the payload past a body inspector
+  severity: 2
+  tags: [multipart, structural, evasion]
+  detection: |
+    pow2:
+      mp.preamble_len: [8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
+    condition: pow2
+- name: multipart preamble
+  title: Bytes stuffed before the first multipart boundary, where a parser has to skip them
+  severity: 2
+  tags: [multipart, structural]
+  suppressed_by: [inspection-window evasion]
+  detection: |
+    pre:
+      mp.preamble_len|gt: 64
+    condition: pre
+- name: malformed multipart
+  title: multipart/form-data declared but no boundary-delimited part in the body
+  severity: 1
+  tags: [multipart, structural]
+  detection: |
+    declared:
+      mp.boundary|re: '.'
+      mp.parts: 0
+    condition: declared
+- name: buffer stuffing
+  title: A long run of one repeated byte; bulk carrying no content, whatever it was added for
+  severity: 2
+  tags: [structural]
+  detection: |
+    run:
+      body|re: '(.)\1{4095,}'
+    condition: run
+- name: session upload progress abuse
+  title: PHP_SESSION_UPLOAD_PROGRESS used to drive attacker-controlled bytes into a session file
+  severity: 1
+  tags: [php, session]
+  suppressed_by: [PHP2Shell]
+  detection: |
+    field:
+      flags|contains: mp:upload_progress_field
+    condition: field
+- name: session file read-back
+  title: Fetching a PHP session file by filesystem path, the read half of an upload-progress poisoning chain
+  severity: 2
+  tags: [php, session, lfi]
+  detection: |
+    sess:
+      query|re|i: '(?:^|&)[\w\[\]]+=/?(?:[\w./-]*/)?sess_[A-Za-z0-9,-]{8,}'
+    condition: sess
+- name: PHP-CGI arg injection
+  title: PHP-CGI argument injection
+  severity: 2
+  cve: [CVE-2024-4577]
+  tags: [php, rce]
+  detection: |
+    inj:
+      target|re|i: '(%ad|%25ad|\s|\+)-?d\+?(allow_url_include|auto_prepend_file)'
+    condition: inj
+- name: PHPUnit eval-stdin
+  title: PHPUnit eval-stdin remote code execution
+  severity: 2
+  cve: [CVE-2017-9841]
+  tags: [php, rce]
+  detection: |
+    p:
+      path|contains: eval-stdin.php
+    condition: p
+- name: ThinkPHP RCE
+  title: ThinkPHP remote code execution
+  severity: 2
+  cve: [CVE-2018-20062]
+  tags: [php, rce]
+  detection: |
+    p:
+      target|contains: [invokefunction, 'think\app']
+    condition: p
+- name: Sunhillo cmd injection
+  title: Sunhillo SureLine command injection
+  severity: 2
+  cve: [CVE-2021-36380]
+  tags: [rce]
+  detection: |
+    p:
+      path|contains|cased: /SDK/webLanguage
+    condition: p
+- name: .env harvesting
+  title: Laravel/.env credential harvesting (Androxgh0st-style)
+  severity: 2
+  tags: [secrets]
+  detection: |
+    p:
+      path|re|i: '/\.env\b|/\.env[.\-]|/[\w.-]*\.env$'
+    condition: p
+- name: git repository exposure
+  title: Reading an exposed .git directory (source and often remote credentials)
+  severity: 2
+  tags: [secrets]
+  detection: |
+    p:
+      path|re|i: '/\.git/(config|HEAD|index|packed-refs|logs/|refs/|objects/)'
+    condition: p
+- name: WordPress probing
+  title: WordPress login, XML-RPC or REST probing
+  severity: 1
+  tags: [wordpress]
+  detection: |
+    p:
+      target|re|i: 'wp-login\.php|xmlrpc\.php|/wp-admin/|/wp-json/|/wp-content/|/wp-includes/|[?&]rest_route='
+    condition: p
+- name: WordPress user enumeration
+  title: Listing WordPress accounts through the REST users endpoint
+  severity: 1
+  tags: [wordpress]
+  detection: |
+    p:
+      target|re|i: '(?:/wp-json/wp/v2|rest_route=/wp/v2)/users'
+    condition: p
+- name: webshell probing
+  title: Webshell / backdoor path probing
+  severity: 2
+  tags: [webshell]
+  detection: |
+    p:
+      path|re|i: '/(shell|cmd|alfa|wso|c99|r57|bypass|byp|hacked|adminer|phpinfo|info|eval)\.php'
+    condition: p
+- name: PHP info and debug page probing
+  title: Sweeping for an exposed phpinfo, debug or framework-environment page
+  severity: 1
+  tags: [php, recon]
+  detection: |
+    p:
+      path|re|i: '/(?:php|pi?|i|t|test|debug|dev|status|version|phpversion|php-?info|_?phpinfo|old_phpinfo|infophp|php_info)\.php$|/(?:info|phpinfo)$|/_?environments?(?:$|/)|/_profiler/'
+    condition: p
+- name: SSRS probe
+  title: MS SQL Server Reporting Services probe
+  severity: 1
+  tags: [recon]
+  detection: |
+    p:
+      path|startswith: /ReportServer
+    condition: p
+- name: Next.js Server Action RCE
+  title: React Server Components unsafe deserialization through a Server Action
+  severity: 2
+  cve: [CVE-2025-55182]
+  tags: [nextjs, rce]
+  detection: |
+    gadget:
+      body|contains|cased: ['"$1:__proto__:then"', '$1:constructor:constructor', '"resolved_model"', '_formData']
+    action_hdr:
+      header.next-action|re: '.'
+      method: POST
+      read_len|gt: 0
+    condition: gadget or action_hdr
+- name: Node code in body
+  title: Node.js code or module import in the request body
+  severity: 2
+  tags: [node, rce]
+  detection: |
+    code:
+      body|contains|cased: ['node:child_process', "child_process')", 'child_process")', 'global[String.fromCharCode', 'process.env.KUBERNETES_SERVICE_HOST', "require('fs')", 'require("fs")']
+    condition: code
+- name: PHP code in body
+  title: PHP code in request body
+  severity: 2
+  tags: [php, rce]
+  suppressed_by: [PHPUnit eval-stdin]
+  detection: |
+    code:
+      body|contains|cased: ['<?php', 'shell_exec', 'base64_decode', 'system(', 'passthru(']
+    condition: code
+- name: research scanner
+  title: Security research scanner (self-identified)
+  severity: 0
+  tags: [benign, scanner]
+  detection: |
+    ua:
+      ua|re|i: 'softsec|research|zgrab|censys|shodan|internetmeasurement|paloalto|synthient|recordedfuture|bitsight|netsystems|cortex|leakix|stretchoid|binaryedge|onyphe'
+    placeholder:
+      ua|contains: example.com
+    hostile:
+      target|re|i: '\.\./|\.\.%2f|\.\.%252f|%2e%2e/|\.\.;/|\.\.\\|\.\.{2,}/|/proc/self/|/etc/passwd|/etc/shadow|/var/run/secrets/|file:///|/\.aws/|kubernetes\.io/serviceaccount|\.docker/config\.json|gcloud/[\w-]*credentials|\.ssh/id_[a-z]+|\.git-credentials|\.netrc'
+    condition: ua and not placeholder and not hostile
+- name: generic fetch
+  title: Front page, favicon, robots or sitemap fetch without payload
+  severity: 0
+  tags: [benign]
+  detection: |
+    fetch:
+      method: [GET, HEAD]
+      query: ''
+      path: ['/', '/index.php', '/index.html', '/favicon.ico', '/favicon.png', '/favicon.svg', '/apple-touch-icon.png', '/apple-touch-icon-precomposed.png', '/robots.txt', '/sitemap.xml', '/ads.txt', '/humans.txt', '/.well-known/security.txt']
+    condition: fetch
+- name: login probing
+  title: Sign-in endpoint discovery
+  severity: 1
+  tags: [recon]
+  detection: |
+    login:
+      target|re|i: '[?&]page=login\b|/(?:login|signin|sign-in|user/login|admin/login|auth/login)(?:\.php|\.aspx|\.html|/|$)'
+    wp:
+      path|contains: wp-login
+    condition: login and not wp
+- name: crawler
+  title: Search / AI crawler
+  severity: 0
+  tags: [benign, crawler]
+  detection: |
+    ua:
+      ua|re|i: 'googlebot|bingbot|claudebot|claude-|gptbot|ccbot|duckassist|applebot|perplexity|amazonbot|yandex|semrush|ahrefs|bytespider|deepseekbot|kimibot|kimi-searchbot|moonshotbot|grokbot|youbot|hunyuan|cohere-ai|meta-external|baiduspider'
+    hostile:
+      target|re|i: '\.\./|\.\.%2f|\.\.%252f|%2e%2e/|\.\.;/|\.\.\\|\.\.{2,}/|/proc/self/|/etc/passwd|/etc/shadow|/var/run/secrets/|file:///|/\.aws/|kubernetes\.io/serviceaccount|\.docker/config\.json|gcloud/[\w-]*credentials|\.ssh/id_[a-z]+|\.git-credentials|\.netrc'
+    condition: ua and not hostile
+- name: spoofed crawler UA
+  title: Attack sent under a search/AI crawler user-agent
+  severity: 2
+  tags: [spoofing]
+  detection: |
+    ua:
+      ua|re|i: 'googlebot|bingbot|claudebot|claude-|gptbot|ccbot|duckassist|applebot|perplexity|amazonbot|yandex|semrush|ahrefs|bytespider|deepseekbot|kimibot|kimi-searchbot|moonshotbot|grokbot|youbot|hunyuan|cohere-ai|meta-external|baiduspider'
+    hostile:
+      target|re|i: '\.\./|\.\.%2f|\.\.%252f|%2e%2e/|\.\.;/|\.\.\\|\.\.{2,}/|/proc/self/|/etc/passwd|/etc/shadow|/var/run/secrets/|file:///|/\.aws/|kubernetes\.io/serviceaccount|\.docker/config\.json|gcloud/[\w-]*credentials|\.ssh/id_[a-z]+|\.git-credentials|\.netrc'
+    condition: ua and hostile
+- name: remote file inclusion
+  title: A parameter an application would feed to include() holding a URL on another host
+  severity: 2
+  tags: [php, rfi]
+  detection: |
+    inc:
+      query|re|i: '(?:^|&)(?:page|pagina|file|path|inc|include|require|doc|template|tpl|lang|locale|load|src|view|module|content|section|menu|op|do|cat|conf|config|dir|p|f|i)=(?:https?|ftps?|gopher|dict)?(?:%3a|:)?(?://|%2f%2f)[^&]*\.'
+    condition: inc
+- name: remote URL in parameter
+  title: A parameter whose value is an absolute URL to an outside host; the shape behind remote inclusion, open redirect and request forgery
+  severity: 1
+  tags: [ssrf, rfi]
+  suppressed_by: [remote file inclusion]
+  detection: |
+    url:
+      query|re|i: '(?:^|&)[\w\[\]%.]+=(?:https?|ftps?|gopher|dict)?(?:%3a|:)?(?://|%2f%2f)[^&]*\.'
+    condition: url
+- name: filesystem path in parameter
+  title: A request parameter whose value is an absolute filesystem path or a PHP stream wrapper
+  severity: 2
+  tags: [php, lfi]
+  detection: |
+    fs:
+      query|re|i: '(?:^|&)[\w\[\]]+=(?:%2f|/)(?:etc|tmp|var|proc|usr|opt|home|root|dev|sys|bin|sbin|srv|mnt|media|lib)[/%]|(?:^|&)[\w\[\]]+=\s*(?:php|file|data|expect|zip|phar|glob|compress\.\w+)://|(?:^|&)[\w\[\]]+=[a-z]:[\\/]+windows'
+    condition: fs
+- name: Next.js middleware bypass
+  title: x-middleware-subrequest header crafted to skip Next.js middleware
+  severity: 2
+  cve: [CVE-2025-29927]
+  tags: [nextjs, auth-bypass]
+  detection: |
+    hdr:
+      header.x-middleware-subrequest|re|i: '(?:src/)?middleware(?::[\w/-]*){2,}'
+    condition: hdr
+- name: phishing kit asset probe
+  title: Fetching the asset filenames of a known phishing kit, to find hosts already serving it
+  severity: 1
+  tags: [phishing]
+  detection: |
+    p:
+      path|re|i: '/(?:js|assets/js|static/style/[\w-]+)/(?:qrcode_twint|twint_ch|raif_ch|lkk_ch|antibot-client|qr_modal|support_parent|sys_files|protect)[\w.-]*\.(?:js|css)|/(?:bot-connect|licensor|antibot-client)\.js'
+    condition: p
+- name: header-injected file read
+  title: Traversal or sensitive-file path smuggled in a request header instead of the URL
+  severity: 2
+  tags: [lfi, evasion]
+  detection: |
+    h:
+      headers|re|i: '\.\./|\.\.%2f|\.\.%252f|%2e%2e/|\.\.;/|\.\.\\|\.\.{2,}/|/proc/self/|/etc/passwd|/etc/shadow|/var/run/secrets/|file:///|/\.aws/|kubernetes\.io/serviceaccount|\.docker/config\.json|gcloud/[\w-]*credentials|\.ssh/id_[a-z]+|\.git-credentials|\.netrc'
+    condition: h
+- name: path traversal
+  title: Directory traversal or /proc self-inspection attempt
+  severity: 2
+  tags: [lfi]
+  detection: |
+    t:
+      target|re|i: '\.\./|\.\.%2f|\.\.%252f|%2e%2e/|\.\.;/|\.\.\\|\.\.{2,}/|/proc/self/|/etc/passwd|/etc/shadow|/var/run/secrets/|file:///'
+    condition: t
+- name: cloud credential theft
+  title: Reading cloud or cluster credentials from the filesystem
+  severity: 2
+  tags: [secrets, cloud]
+  detection: |
+    c:
+      target|re|i: '/\.aws/|kubernetes\.io/serviceaccount|\.docker/config\.json|gcloud/[\w-]*credentials|\.ssh/id_[a-z]+|\.git-credentials|\.netrc|/(?:gcp|google|firebase)[\w-]*(?:key|credentials|sa|adminsdk)[\w-]*\.json|/(?:service-account|sa|key|keyfile|application_default_credentials|credentials)\.json'
+    condition: c
+- name: host mismatch
+  title: Host header is not one of the node's own names
+  severity: 1
+  tags: [recon]
+  detection: |
+    other:
+      host|re: '.'
+      host_known: false
+    condition: other

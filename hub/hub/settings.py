@@ -39,14 +39,16 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.postgres",
     "apps.core",
-    "apps.sensors",
+    "apps.nodes",
+    "apps.sensors",  # migration history only (the server row moved to apps.nodes)
     "apps.events",
+    "apps.rules",
 ]
 
-# Sensor batches: up to 500 records / 1 MiB gzip per POST (docs/PROTOCOL.md); the ingress allows 8m.
+# Node batches: up to 500 records / 1 MiB gzip per POST (docs/PROTOCOL.md); the ingress allows 8m.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 8 * 1024 * 1024
-# What the node page tells a new sensor to run and where to report.
-SENSOR_IMAGE = env("SENSOR_IMAGE", "ghcr.io/tobiashofmaenner/thf-pot-sensor:main")
+# What the node page tells a new node to run and where to report.
+SENSOR_IMAGE = env("SENSOR_IMAGE", "ghcr.io/tobiashofmaenner/thf-pot-node:main")
 HUB_PUBLIC_URL = env("HUB_PUBLIC_URL")  # default: derived from the request
 
 MIDDLEWARE = [
@@ -111,6 +113,7 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULE = {
     "heartbeat": {"task": "apps.core.tasks.heartbeat", "schedule": 60.0},
     "geo-sweep": {"task": "apps.events.tasks.enrich_pending", "schedule": 60.0},
+    "classify-sweep": {"task": "apps.rules.tasks.classify_pending", "schedule": 60.0},
 }
 
 # DB-IP Lite databases baked into the image (see Dockerfile); absent = no geo, never an error.

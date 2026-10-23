@@ -4,6 +4,6 @@
   <div hx-get="{% url 'status_fragment' %}" hx-trigger="load, every 10s" hx-swap="innerHTML">
     <small>checking the stack…</small>
   </div>
-  <h2>sensors</h2>
+  <h2>nodes</h2>
   <p><a href="{% url 'nodes' %}">nodes</a> — add a node, mint its token, copy the deploy snippets.</p>
 {% endblock %}

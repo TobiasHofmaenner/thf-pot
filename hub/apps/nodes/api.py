@@ -1,4 +1,4 @@
-"""Sensor-facing endpoints (docs/PROTOCOL.md). Bearer token → Sensor; everything else is 401."""
+"""Node-facing endpoints (docs/PROTOCOL.md). Bearer token → Node; everything else is 401."""
 
 import gzip
 import json
@@ -14,20 +14,20 @@ from apps.core.net import client_ip
 from apps.events import geo
 
 from .ingest import ingest_batch
-from .models import Sensor
+from .models import Node
 
 log = logging.getLogger(__name__)
-router = Router(tags=["sensors"])
+router = Router(tags=["nodes"])
 
-MAX_BATCH_BYTES = 16 * 1024 * 1024  # decompressed; a sensor batch is at most 1 MiB
+MAX_BATCH_BYTES = 16 * 1024 * 1024  # decompressed; a node batch is at most 1 MiB
 
 
-class SensorAuth(HttpBearer):
+class NodeAuth(HttpBearer):
     def authenticate(self, request, token):
-        return Sensor.authenticate(token)
+        return Node.authenticate(token)
 
 
-auth = SensorAuth()
+auth = NodeAuth()
 
 
 def _decode_body(request) -> bytes:
@@ -49,7 +49,7 @@ def _decode_body(request) -> bytes:
 
 @router.post("/ingest", auth=auth, response={202: dict})
 def ingest(request):
-    sensor = request.auth
+    node = request.auth
     data = _decode_body(request)
     records, bad_lines = [], 0
     for line in data.splitlines():
@@ -61,10 +61,10 @@ def ingest(request):
             bad_lines += 1
     if not records and bad_lines:
         raise HttpError(400, "no parseable records")
-    result = ingest_batch(sensor, records)
+    result = ingest_batch(node, records)
     result["rejected"] += bad_lines
     if result["rejected"]:
-        log.warning("sensor %s: %d record(s) rejected in a batch of %d", sensor.name, result["rejected"], len(records) + bad_lines)
+        log.warning("node %s: %d record(s) rejected in a batch of %d", node.name, result["rejected"], len(records) + bad_lines)
     return 202, result
 
 
@@ -81,26 +81,26 @@ class HeartbeatIn(Schema):
 
 @router.post("/heartbeat", auth=auth)
 def heartbeat(request, hb: HeartbeatIn):
-    sensor = request.auth
+    node = request.auth
     now = timezone.now()
     body = hb.dict()
     body["received_at"] = now.isoformat(timespec="seconds")
     body["domains"] = [str(d)[:253] for d in body["domains"][:50]]
     ip = client_ip(request)
     fields = {"last_heartbeat": body, "last_seen_at": now, "public_ip": ip}
-    if sensor.first_seen_at is None:
+    if node.first_seen_at is None:
         fields["first_seen_at"] = now
-    if ip and (ip != sensor.public_ip or sensor.lat is None):
+    if ip and (ip != node.public_ip or node.lat is None):
         # Where the node is: the map draws arcs to it.
         g = geo.lookup(ip)
         fields.update(cc=g.get("cc", "") or "", city=g.get("city", "") or "", lat=g.get("lat"), lon=g.get("lon"))
     state = body.pop("state", "")[:32]
     detail = body.pop("detail", {})
     if state:
-        if state != sensor.state or detail != (sensor.state_detail or {}):
+        if state != node.state or detail != (node.state_detail or {}):
             fields["state_changed_at"] = now
         fields["state"] = state
         fields["state_detail"] = detail if isinstance(detail, dict) else {}
-        log.info("sensor %s: state %s", sensor.name, state)
-    Sensor.objects.filter(pk=sensor.pk).update(**fields)
+        log.info("node %s: state %s", node.name, state)
+    Node.objects.filter(pk=node.pk).update(**fields)
     return {"ok": True, "your_ip": ip}

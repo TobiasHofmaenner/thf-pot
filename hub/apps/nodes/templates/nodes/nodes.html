@@ -3,7 +3,7 @@
 {% block content %}
   <h1>nodes</h1>
   <section id="nodes" hx-get="{% url 'node_list' %}" hx-trigger="every 5s, nodes-changed from:body" hx-swap="innerHTML">
-    {% include "sensors/_node_list.html" %}
+    {% include "nodes/_node_list.html" %}
   </section>
 
   <h2>add node</h2>

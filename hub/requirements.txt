@@ -6,3 +6,4 @@ psycopg[binary]==3.2.9
 gunicorn==23.0.0
 whitenoise==6.8.2
 maxminddb==3.2.0
+PyYAML==6.0.2

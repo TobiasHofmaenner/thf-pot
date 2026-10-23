@@ -1,0 +1,39 @@
+<h2>{% if rule.pk %}{{ rule.name }}{% else %}new rule{% endif %}</h2>
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<form class="stack" id="ruleform" hx-post="{% if rule.pk %}{% url 'rule_save' rule.pk %}{% else %}{% url 'rule_create' %}{% endif %}" hx-target="#editor" hx-swap="innerHTML">
+  <div class="row">
+    <label>Name <small>— becomes the event label</small><input name="name" maxlength="64" required value="{{ rule.name }}"></label>
+    <label>Severity<select name="severity">{% for v, n in sevs %}<option value="{{ v }}"{% if rule.severity == v %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+    <label>Origin<select name="origin">{% for v, n in origins %}<option value="{{ v }}"{% if rule.origin == v %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+    <label><input type="checkbox" name="enabled" {% if rule.enabled %}checked{% endif %} style="display:inline;width:auto"> enabled</label>
+  </div>
+  <label>Title<input name="title" maxlength="200" value="{{ rule.title }}"></label>
+  <div class="row">
+    <label>Tags <small>— comma-separated</small><input name="tags" value="{{ rule.tags|join:", " }}"></label>
+    <label>CVE<input name="cve" value="{{ rule.cve|join:", " }}"></label>
+    <label>Suppressed by <small>— drop this label when any of these matched</small><input name="suppressed_by" value="{{ rule.suppressed_by|join:", " }}"></label>
+  </div>
+  <label>Detection <small>— Sigma selections + condition, YAML</small>
+    <textarea class="yaml" name="detection" spellcheck="false" required>{{ rule.detection }}</textarea></label>
+  <label>Description<textarea name="description" rows="2">{{ rule.description }}</textarea></label>
+  <p>
+    <button type="button" hx-post="{% if rule.pk %}{% url 'rule_check' rule.pk %}{% else %}{% url 'rule_check_new' %}{% endif %}" hx-include="#ruleform" hx-target="#editor" hx-swap="innerHTML">validate &amp; test on the last 500</button>
+    <button class="primary">save</button>
+    {% if rule.pk %}<button type="button" hx-post="{% url 'rule_delete' rule.pk %}" hx-target="#editor" hx-swap="innerHTML" hx-confirm="Delete rule {{ rule.name }}? Events keep their current labels until the relabel runs.">delete</button>{% endif %}
+  </p>
+</form>
+{% if result %}
+  <h2>test: {{ result.matched }} of the last {{ result.total }} events match</h2>
+  <p class="mut"><small>fields used: {{ result.fields|join:", " }}</small></p>
+  {% if result.sample %}
+  <table class="sample"><tbody>
+  {% for e in result.sample %}<tr><td>{{ e.ts|slice:"11:19" }}</td><td>{{ e.cc }}</td><td>{{ e.src }}</td><td>{{ e.node }}</td><td>{{ e.method }}</td><td><code>{{ e.path }}</code></td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+{% endif %}
+{% if rule.pk %}
+  <h2>export</h2>
+  <p><small>modsec: {% if ex.modsec %}<span class="bad">{{ ex.modsec }}</span>{% else %}<span class="ok">ok</span> · <a href="/api/v1/rules/{{ rule.pk }}/export?format=modsec&mode=detect">detect</a> · <a href="/api/v1/rules/{{ rule.pk }}/export?format=modsec&mode=block">block</a>{% endif %}
+  &nbsp; cloudflare: {% if ex.cloudflare %}<span class="bad">{{ ex.cloudflare }}</span>{% else %}<span class="ok">ok</span> · <a href="/api/v1/rules/{{ rule.pk }}/export?format=cloudflare">expression</a>{% endif %}</small></p>
+{% endif %}

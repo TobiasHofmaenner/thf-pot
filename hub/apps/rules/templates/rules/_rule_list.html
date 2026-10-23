@@ -1,0 +1,23 @@
+{% if rows %}
+<table>
+  <thead><tr><th>rule</th><th>severity</th><th>origin</th><th>tags</th><th>hits</th><th>waf</th><th></th></tr></thead>
+  <tbody>
+  {% for x in rows %}
+    <tr{% if not x.r.enabled %} class="mut"{% endif %}>
+      <td><a href="#" hx-get="{% url 'rule_edit' x.r.pk %}" hx-target="#editor" hx-swap="innerHTML">{{ x.r.name }}</a>{% if not x.r.enabled %} <small>(disabled)</small>{% endif %}
+          {% if x.r.title %}<br><small class="mut">{{ x.r.title|truncatechars:90 }}</small>{% endif %}
+          {% if x.r.cve %}<br><small>{{ x.r.cve|join:", " }}</small>{% endif %}</td>
+      <td class="sev{{ x.r.severity }}">{{ x.r.severity_name }}</td>
+      <td><span class="origin {{ x.r.origin }}">{{ x.r.origin }}</span></td>
+      <td><small>{{ x.r.tags|join:", " }}</small></td>
+      <td>{{ x.hits }}</td>
+      <td><small title="modsec: {{ x.waf }} · cloudflare: {{ x.cf }}">{% if x.waf == "ok" %}<span class="ok">✓</span>{% else %}<span class="mut">–</span>{% endif %} modsec
+          {% if x.cf == "ok" %}<span class="ok">✓</span>{% else %}<span class="mut">–</span>{% endif %} cf</small></td>
+      <td><button hx-get="{% url 'rule_edit' x.r.pk %}" hx-target="#editor" hx-swap="innerHTML">edit</button></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="mut">No rules yet.</p>
+{% endif %}

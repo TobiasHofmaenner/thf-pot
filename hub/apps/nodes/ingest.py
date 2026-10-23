@@ -1,4 +1,4 @@
-"""Turn sensor records into Event rows. Every field is attacker-influenced; parse defensively,
+"""Turn node records into Event rows. Every field is attacker-influenced; parse defensively,
 cap lengths, and never let one bad line reject a batch."""
 
 import base64
@@ -12,7 +12,7 @@ from django.utils import timezone as dj_tz
 
 from apps.events.models import Event
 
-from .models import Sensor
+from .models import Node
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _ts(v):
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
-def to_event(sensor: Sensor, rec: dict) -> Event:
+def to_event(node: Node, rec: dict) -> Event:
     if not isinstance(rec, dict) or rec.get("v") != 1:
         raise BadRecord("schema")
     ulid = rec.get("id")
@@ -70,7 +70,7 @@ def to_event(sensor: Sensor, rec: dict) -> Event:
     extra = {k: v for k, v in rec.items() if k not in KNOWN_KEYS} or None
 
     return Event(
-        sensor=sensor,
+        node=node,
         ulid=ulid,
         ts=_ts(rec.get("ts")),
         src=src,
@@ -99,25 +99,25 @@ def to_event(sensor: Sensor, rec: dict) -> Event:
     )
 
 
-def _enqueue_geo(sensor_pk: int, ulids: list[str]):
+def _enqueue_geo(node_pk: int, ulids: list[str]):
     from apps.events.tasks import enrich_events
 
-    ids = list(Event.objects.filter(sensor_id=sensor_pk, ulid__in=ulids).values_list("id", flat=True))
+    ids = list(Event.objects.filter(node_id=node_pk, ulid__in=ulids).values_list("id", flat=True))
     try:
         enrich_events.delay(ids)
     except Exception as e:  # noqa: BLE001 - broker down: the periodic sweep catches up
         log.warning("geo task not queued (%s); the sweep will enrich", e)
 
 
-def ingest_batch(sensor: Sensor, records: list) -> dict:
-    """Insert what is new, count what is duplicate or malformed, bump the sensor's counters."""
+def ingest_batch(node: Node, records: list) -> dict:
+    """Insert what is new, count what is duplicate or malformed, bump the node's counters."""
     events, rejected = [], 0
     for rec in records:
         try:
-            events.append(to_event(sensor, rec))
+            events.append(to_event(node, rec))
         except BadRecord as e:
             rejected += 1
-            log.warning("sensor %s: rejected record (%s)", sensor.name, e)
+            log.warning("node %s: rejected record (%s)", node.name, e)
 
     seen: set[str] = set()
     unique = []
@@ -131,7 +131,7 @@ def ingest_batch(sensor: Sensor, records: list) -> dict:
     if unique:
         with transaction.atomic():
             existing = set(
-                Event.objects.filter(sensor=sensor, ulid__in=[e.ulid for e in unique]).values_list("ulid", flat=True)
+                Event.objects.filter(node=node, ulid__in=[e.ulid for e in unique]).values_list("ulid", flat=True)
             )
             new = [e for e in unique if e.ulid not in existing]
             duplicates += len(unique) - len(new)
@@ -140,13 +140,13 @@ def ingest_batch(sensor: Sensor, records: list) -> dict:
                 Event.objects.bulk_create(new, ignore_conflicts=True, batch_size=200)
                 accepted = len(new)
                 latest = max(e.ts for e in new)
-                Sensor.objects.filter(pk=sensor.pk).update(
+                Node.objects.filter(pk=node.pk).update(
                     events_total=F("events_total") + accepted,
                     last_event_at=latest,
                     last_seen_at=dj_tz.now(),
                 )
                 ulids = [e.ulid for e in new]
-                transaction.on_commit(lambda: _enqueue_geo(sensor.pk, ulids))
+                transaction.on_commit(lambda: _enqueue_geo(node.pk, ulids))
     if not accepted:
-        Sensor.objects.filter(pk=sensor.pk).update(last_seen_at=dj_tz.now())
+        Node.objects.filter(pk=node.pk).update(last_seen_at=dj_tz.now())
     return {"accepted": accepted, "duplicates": duplicates, "rejected": rejected}
