@@ -45,7 +45,11 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha,scope=sensor
           cache-to: type=gha,mode=max,scope=sensor
+          # Published under both names: thf-pot-node is the correct one (node = the server), thf-pot-sensor stays
+          # for the containers already deployed with it.
           tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/thf-pot-node:main
+            ghcr.io/${{ steps.meta.outputs.owner }}/thf-pot-node:main-${{ steps.meta.outputs.ts }}-${{ steps.meta.outputs.sha }}
             ghcr.io/${{ steps.meta.outputs.owner }}/thf-pot-sensor:main
             ghcr.io/${{ steps.meta.outputs.owner }}/thf-pot-sensor:main-${{ steps.meta.outputs.ts }}-${{ steps.meta.outputs.sha }}
 

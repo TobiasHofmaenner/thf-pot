@@ -8,6 +8,7 @@ from django.http import Http404
 from django.utils import timezone
 from ninja import Router
 
+from apps.nodes.hosts import match_host
 from apps.nodes.models import Node
 
 from .models import Event
@@ -36,9 +37,9 @@ def _compact(e: Event, nodes: dict) -> dict:
         "method": e.method,
         "host": e.host or "-",
         "path": e.target or e.path,
-        "node": nodes.get(e.node_id, ("?", set()))[0],
+        "node": nodes.get(e.node_id, ("?", []))[0],
         # sensor = the hostname of ours the request was aimed at; empty when the scanner typed something else
-        "sensor": e.host if (e.host or "").lower() in nodes.get(e.node_id, ("?", set()))[1] else "",
+        "sensor": e.host if match_host(e.host, nodes.get(e.node_id, ("?", []))[1]) else "",
         "tier": (e.resp or {}).get("tier", ""),
         "flags": e.flags,
         "labels": e.labels,
@@ -49,7 +50,7 @@ def _compact(e: Event, nodes: dict) -> dict:
 
 
 def _node_names() -> dict:
-    return {i: (n, {d.lower() for d in doms}) for i, n, doms in Node.objects.values_list("id", "name", "domains")}
+    return {i: (n, list(doms)) for i, n, doms in Node.objects.values_list("id", "name", "domains")}
 
 
 @router.get("/events/recent")
@@ -145,7 +146,7 @@ def detail(request, event_id: int):
         "ts": e.ts.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "received_at": e.received_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
         "node": e.node.name,
-        "sensor": e.host if (e.host or "").lower() in {d.lower() for d in e.node.domains} else "",
+        "sensor": e.host if match_host(e.host, e.node.domains) else "",
         "src": e.src, "src_port": e.src_port, "self": e.is_self,
         "cc": e.cc, "city": e.city, "lat": e.lat, "lon": e.lon, "asn": e.asn, "as_name": e.as_name,
         "scheme": e.scheme, "http": e.http_version, "method": e.method, "host": e.host,

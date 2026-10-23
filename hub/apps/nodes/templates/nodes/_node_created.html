@@ -3,6 +3,8 @@
 <p>token <button data-copy="tok">copy</button></p>
 <pre id="tok" class="token">{{ token }}</pre>
 
+{% if node.proxied %}<div class="notice">Proxied node: point every sensor's vhost at <code>http://127.0.0.1:8081</code> with
+<code>proxy_set_header Host $host; X-Real-IP $remote_addr; X-Forwarded-Proto $scheme;</code>. Only loopback is published.</div>{% endif %}
 <h2>option A — one command</h2>
 <div class="snippet"><button data-copy="run">copy</button><pre id="run">{{ s.docker_run }}</pre></div>
 

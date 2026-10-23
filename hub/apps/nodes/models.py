@@ -28,6 +28,9 @@ class Node(models.Model):
     domains = ArrayField(models.CharField(max_length=253), default=list, blank=True)
     # Operator addresses / networks; the node stores their requests with self=true.
     self_ips = ArrayField(models.CharField(max_length=64), default=list, blank=True)
+    # Behind the operator's own TLS proxy (nginx, Traefik): the node listens on loopback over plain
+    # HTTP and trusts X-Real-IP / X-Forwarded-Proto; certificates are the proxy's business.
+    proxied = models.BooleanField(default=False)
     acme_email = models.EmailField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
 
@@ -114,7 +117,9 @@ class Node(models.Model):
                 dns = ("ok", str(d.get("public_ip", "")))
             else:
                 dns = ("pending", "")
-            if self.state == "ready":
+            if d.get("tls") == "disabled":
+                certs = ("skip", "terminated by the node's own proxy")
+            elif self.state == "ready":
                 certs = ("ok", ", ".join(d.get("certs") or []))
             elif self.state == "cert_error":
                 certs = ("fail", acme_detail(str(d.get("error", ""))))

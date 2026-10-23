@@ -37,7 +37,7 @@ Day files are deleted after `RETAIN_DAYS` (30) only once fully shipped.
 | Variable | Default | Meaning |
 |---|---|---|
 | `HUB_URL` | required | hub base URL, e.g. `https://pot.thfops.net` |
-| `SENSOR_TOKEN` | required | bearer token issued by the hub for this node |
+| `NODE_TOKEN` | required | bearer token issued by the hub for this node (`SENSOR_TOKEN` still accepted) |
 | `DOMAINS` | required | comma-separated hostnames this node serves |
 | `ACME_EMAIL` | – | contact for the CA (expiry notices) |
 | `ACME_STAGING` | `0` | use Let's Encrypt staging (no rate limits, untrusted certs) |

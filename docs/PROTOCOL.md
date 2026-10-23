@@ -1,6 +1,6 @@
 # Sensor → hub protocol, v1
 
-All calls are HTTPS to `HUB_URL` with `Authorization: Bearer <SENSOR_TOKEN>`. The hub maps the
+All calls are HTTPS to `HUB_URL` (the node's `NODE_TOKEN`, formerly `SENSOR_TOKEN`) with `Authorization: Bearer <NODE_TOKEN>`. The hub maps the
 token to a sensor; the sensor never names itself. Anything in a request body is attacker-derived
 data and is treated as untrusted on the hub.
 

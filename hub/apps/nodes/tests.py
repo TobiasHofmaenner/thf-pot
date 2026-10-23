@@ -193,11 +193,11 @@ class NodePageTests(TestCase):
         self.assertEqual(len(token), 43)
         self.assertEqual(node.token_sha256, Node.hash_token(token))
         self.assertEqual(Node.authenticate(token), node)
-        self.assertIn("SENSOR_TOKEN=" + token, html)
+        self.assertIn("NODE_TOKEN=" + token, html)
         self.assertIn("DOMAINS=files.example.org,backup.example.org", html)
         self.assertIn("HUB_URL=https://pot.example", html)
         self.assertIn("ACME_EMAIL=a@b.cd", html)
-        self.assertIn("-e SENSOR_TOKEN=" + token, html)
+        self.assertIn("-e NODE_TOKEN=" + token, html)
 
     def test_rotate_invalidates_old_token(self):
         node = Node(name="n", domains=["x.example.org"])

@@ -136,12 +136,15 @@ async fn handle(
     req: Request,
 ) -> Response {
     let t0 = Instant::now();
-    let scheme = st.scheme;
+    let mut scheme = st.scheme;
     let (parts, body) = req.into_parts();
 
     // Source address. Only trust proxy headers when told to; this node normally terminates TLS itself.
     let mut src = peer.ip();
     if st.cfg.trust_proxy {
+        if let Some(p) = parts.headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
+            scheme = if p.eq_ignore_ascii_case("https") { "https" } else { "http" };
+        }
         let fwd = parts
             .headers
             .get("x-real-ip")

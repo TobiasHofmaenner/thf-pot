@@ -5,7 +5,7 @@
   {% for n in nodes %}
     <tr>
       <td>{{ n.name }}{% if n.notes %}<br><small>{{ n.notes|truncatechars:60 }}</small>{% endif %}</td>
-      <td>{% for d in n.domains %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if n.self_ips %}<br><small class="mut">self: {{ n.self_ips|join:", " }}</small>{% endif %}</td>
+      <td>{% for d in n.domains %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if n.self_ips %}<br><small class="mut">self: {{ n.self_ips|join:", " }}</small>{% endif %}{% if n.proxied %}<br><small class="mut">behind own proxy</small>{% endif %}</td>
       <td><code>{{ n.token_prefix }}…</code></td>
       <td>
         {% for p in n.phases %}<span class="phase {{ p.status }}" title="{{ p.note }}">{% if p.status == 'ok' %}✓{% elif p.status == 'fail' %}✗{% elif p.status == 'skip' %}–{% else %}·{% endif %} {{ p.name }}</span>{% endfor %}

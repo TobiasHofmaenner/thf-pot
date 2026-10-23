@@ -42,11 +42,13 @@ pub async fn run(cfg: &Config, hub: &hub::Client, status: &Shared) {
             continue;
         };
 
-        // 2. Every domain must resolve to it.
+        // 2. Every domain must resolve to it. A wildcard is checked through a label nobody would
+        //    have created explicitly, so only the wildcard record can answer it.
         let mut domains = BTreeMap::new();
         let mut all_ok = true;
         for d in &cfg.domains {
-            let ips = resolve(d).await;
+            let probe = d.strip_prefix("*.").map(|rest| format!("thf-pot-preflight.{rest}")).unwrap_or_else(|| d.clone());
+            let ips = resolve(&probe).await;
             let ok = ips.contains(&me);
             all_ok &= ok;
             domains.insert(d.clone(), serde_json::json!({ "ok": ok, "resolved": ips }));

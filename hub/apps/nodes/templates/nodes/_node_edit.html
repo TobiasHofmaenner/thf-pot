@@ -4,6 +4,7 @@
 " }}</textarea></label>
   <label>Self IPs <small>— your own addresses or networks; their requests are stored with <code>self: true</code></small>
     <input name="self_ips" value="{{ node.self_ips|join:", " }}"></label>
+  <label><input type="checkbox" name="proxied" {% if node.proxied %}checked{% endif %} style="display:inline;width:auto"> behind my own TLS proxy (loopback HTTP, trusts X-Real-IP)</label>
   <label>ACME e-mail<input name="acme_email" type="email" value="{{ node.acme_email }}"></label>
   <label>Notes<input name="notes" maxlength="2000" value="{{ node.notes }}"></label>
   <button class="primary">save</button>

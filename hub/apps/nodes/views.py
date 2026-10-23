@@ -11,7 +11,8 @@ from apps.core.net import client_ip
 from . import snippets
 from .models import Node
 
-_HOST = re.compile(r"^(?=.{1,253}$)(?!-)([a-z0-9-]{1,63}(?<!-)\.)+[a-z0-9-]{2,63}$")
+# A hostname, or a wildcard sensor such as *.example.org (served by a wildcard certificate behind a proxy).
+_HOST = re.compile(r"^(?=.{1,253}$)(\*\.)?(?!-)([a-z0-9-]{1,63}(?<!-)\.)+[a-z0-9-]{2,63}$")
 
 
 def parse_domains(text: str) -> list[str]:
@@ -81,6 +82,7 @@ def _apply_fields(node, post):
         raise ValueError("at least one domain is required")
     node.domains = domains
     node.self_ips = parse_self_ips(post.get("self_ips", ""))
+    node.proxied = post.get("proxied") == "on"
     node.acme_email = (post.get("acme_email") or "").strip()[:254]
     node.notes = (post.get("notes") or "").strip()[:2000]
 
@@ -107,7 +109,7 @@ def node_edit(request, pk):
             _apply_fields(node, request.POST)
         except ValueError as e:
             return _error(request, str(e))
-        node.save(update_fields=["domains", "self_ips", "acme_email", "notes"])
+        node.save(update_fields=["domains", "self_ips", "proxied", "acme_email", "notes"])
         env = [line for line in snippets.env_lines(node, "<unchanged>", snippets.hub_url(request)) if not line.startswith("#")]
         resp = render(request, "nodes/_node_edited.html", {"node": node, "env": "\n".join(env)})
         resp["HX-Trigger"] = "nodes-changed"

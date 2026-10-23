@@ -69,8 +69,10 @@ impl Config {
             .ok_or_else(|| anyhow::anyhow!("HUB_URL is required (e.g. https://pot.thfops.net)"))?
             .trim_end_matches('/')
             .to_string();
-        let sensor_token =
-            env("SENSOR_TOKEN").ok_or_else(|| anyhow::anyhow!("SENSOR_TOKEN is required"))?;
+        // NODE_TOKEN is the name (node = this server); SENSOR_TOKEN is accepted for deployments made before the rename.
+        let sensor_token = env("NODE_TOKEN")
+            .or_else(|| env("SENSOR_TOKEN"))
+            .ok_or_else(|| anyhow::anyhow!("NODE_TOKEN is required"))?;
         let http_only = env_bool("HTTP_ONLY", false);
         let domains: Vec<String> = env_list("DOMAINS")
             .into_iter()

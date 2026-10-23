@@ -51,12 +51,20 @@ async fn main() -> anyhow::Result<()> {
         "thf-pot sensor starting"
     );
 
-    if cfg.http_only {
+    if cfg.domains.is_empty() {
         status.set("ready", serde_json::json!({ "tls": "disabled", "dns": "skipped" }));
     } else {
-        // Blocks until every domain resolves to this node; nothing listens before that.
+        // Blocks until every domain resolves to this node; nothing listens before that. Behind a
+        // TLS-terminating proxy (HTTP_ONLY) the check is just as valid; only the certificate phase is
+        // somebody else's.
         preflight::run(&cfg, &hub, &status).await;
-        status.set("cert_pending", status.get().detail);
+        let mut d = status.get().detail;
+        if cfg.http_only {
+            d["tls"] = serde_json::json!("disabled");
+            status.set("ready", d);
+        } else {
+            status.set("cert_pending", d);
+        }
     }
 
     tokio::spawn(shipper::run(cfg.clone(), store.clone(), hub.clone(), status.clone()));

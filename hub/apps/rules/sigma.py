@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from apps.nodes.hosts import match_host
+
 
 class RuleError(ValueError):
     pass
@@ -343,8 +345,8 @@ def context(e, known_hosts=()) -> dict:
         "mp.session_upload_progress": bool(mp.get("session_upload_progress")), "mp.names": "\n".join(mp.get("names_sample") or []),
         "resp.tier": (e.resp or {}).get("tier", ""), "resp.kind": (e.resp or {}).get("kind", ""),
         "node": getattr(getattr(e, "node", None), "name", ""), "hdr_fp": e.hdr_fp,
-        "host_known": (e.host or "").lower() in {h.lower() for h in known_hosts}, "self": e.is_self,
-        "sensor": e.host if (e.host or "").lower() in {h.lower() for h in known_hosts} else "",
+        "host_known": bool(match_host(e.host, known_hosts)), "self": e.is_self,
+        "sensor": e.host if match_host(e.host, known_hosts) else "",
     }
     for k, v in hdr.items():
         ctx[HEADER_PREFIX + k] = v
