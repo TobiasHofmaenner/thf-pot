@@ -50,7 +50,7 @@ def build(node, token: str, hub: str) -> dict:
     run_lines += [f"  -e {line}" for line in env if not line.startswith("#")]
     run_lines += [
         f"  {ports_run} -v thf-pot-data:/data",
-        "  --read-only --cap-drop ALL --security-opt no-new-privileges --memory 256m --pids-limit 64",
+        "  --read-only --cap-drop ALL --security-opt no-new-privileges --memory 512m --pids-limit 64",
         f"  {image}",
     ]
     docker_run = " \\\n".join(run_lines)
@@ -68,7 +68,7 @@ def build(node, token: str, hub: str) -> dict:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 256m
+    mem_limit: 512m
     pids_limit: 64
     logging:
       driver: json-file

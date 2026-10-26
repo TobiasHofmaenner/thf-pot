@@ -9,7 +9,7 @@ use crate::{config::Config, hub, status::Shared, store::Store};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufRead, Read, Seek, SeekFrom, Write},
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -18,6 +18,9 @@ use tracing::{info, warn};
 
 const MAX_BATCH_LINES: usize = 500;
 const MAX_BATCH_BYTES: usize = 1024 * 1024;
+/// A single record (one request with its full body, base64) may exceed a batch; it then ships alone.
+/// Beyond this it is skipped with a warning rather than stalling the cursor forever.
+const MAX_LINE_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 struct Cursor {
@@ -95,7 +98,24 @@ fn next_batch(dir: &Path, cur: &mut Cursor) -> anyhow::Result<Option<(Vec<u8>, u
     }
     f.seek(SeekFrom::Start(cur.offset))?;
     let mut buf = Vec::with_capacity(MAX_BATCH_BYTES.min((len - cur.offset) as usize + 1));
-    f.take(MAX_BATCH_BYTES as u64).read_to_end(&mut buf)?;
+    (&mut f).take(MAX_BATCH_BYTES as u64).read_to_end(&mut buf)?;
+
+    // A record longer than a whole batch (a request with a full-size body): read to its newline
+    // and ship it on its own.
+    if buf.len() >= MAX_BATCH_BYTES && !buf.contains(&b'\n') {
+        let mut rest = Vec::new();
+        std::io::BufReader::new(&mut f).read_until(b'\n', &mut rest)?;
+        if rest.last() != Some(&b'\n') {
+            return Ok(None); // still being written
+        }
+        if buf.len() + rest.len() > MAX_LINE_BYTES {
+            warn!(bytes = buf.len() + rest.len(), file = %cur.file, "record larger than MAX_LINE_BYTES skipped");
+            cur.offset += (buf.len() + rest.len()) as u64;
+            return next_batch(dir, cur);
+        }
+        buf.extend_from_slice(&rest);
+        return Ok(Some((buf, 1)));
+    }
 
     // Only complete lines.
     let Some(last_nl) = buf.iter().rposition(|&b| b == b'\n') else {
@@ -163,6 +183,18 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
                             info!(lines, file = %cur.file, offset = cur.offset, "shipped");
                             pause = Duration::ZERO; // more may be waiting
                         }
+                        // A single record the hub calls too large would be retried forever and block
+                        // everything behind it. Leave it in the day file (RETAIN_DAYS still applies)
+                        // and move on; a whole batch refused that way is a configuration mismatch
+                        // and keeps being retried, loudly.
+                        Err(e) if lines == 1 && e.downcast_ref::<hub::Rejected>().is_some_and(|r| r.status == 413) => {
+                            warn!(error = %e, bytes = bytes.len(), file = %advanced.file, "hub refused the record as too large; skipped, kept on disk");
+                            cur = Cursor { file: advanced.file, offset: new_offset };
+                            if let Err(e) = cur.save(&cursor_path) {
+                                warn!(error = %e, "cursor save failed");
+                            }
+                            pause = Duration::ZERO;
+                        }
                         Err(e) => {
                             warn!(error = %e, retry_in_s = backoff, "ship failed");
                             pause = Duration::from_secs(backoff);
@@ -197,5 +229,54 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
         if tokio::time::timeout(pause, status.changed.notified()).await.is_ok() {
             last_hb = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("thf-pot-shipper-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn take(d: &Path, cur: &mut Cursor) -> Option<(Vec<u8>, usize)> {
+        let got = next_batch(d, cur).unwrap();
+        if let Some((b, _)) = &got {
+            cur.offset += b.len() as u64; // what run() does after a 2xx
+        }
+        got
+    }
+
+    #[test]
+    fn a_record_larger_than_a_batch_ships_alone_and_nothing_is_skipped() {
+        let d = scratch("big");
+        let small = "{\"v\":1}\n";
+        let big = format!("{{\"v\":1,\"b\":\"{}\"}}\n", "A".repeat(MAX_BATCH_BYTES + 4096));
+        std::fs::write(d.join("events-2026-10-26.jsonl"), format!("{small}{big}{small}")).unwrap();
+        let mut cur = Cursor::default();
+
+        let (b, n) = take(&d, &mut cur).unwrap();
+        assert_eq!((b.as_slice(), n), (small.as_bytes(), 1));
+        let (b, n) = take(&d, &mut cur).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(b, big.as_bytes());
+        let (b, n) = take(&d, &mut cur).unwrap();
+        assert_eq!((b.as_slice(), n), (small.as_bytes(), 1));
+        assert!(take(&d, &mut cur).is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_big_record_still_being_written_waits() {
+        let d = scratch("partial");
+        std::fs::write(d.join("events-2026-10-26.jsonl"), "A".repeat(MAX_BATCH_BYTES + 10)).unwrap();
+        let mut cur = Cursor::default();
+        assert!(take(&d, &mut cur).is_none());
+        assert_eq!(cur.offset, 0);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

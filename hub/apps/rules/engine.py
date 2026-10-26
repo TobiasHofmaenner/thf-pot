@@ -3,7 +3,7 @@
 import logging
 import threading
 
-from django.db.models import Max
+from django.db.models import BinaryField, F, Func, Max
 from django.utils import timezone
 
 from apps.events.models import Event
@@ -57,18 +57,34 @@ def classify_one(event: Event, rules: list[Compiled], known_hosts=()) -> tuple[l
     return labels, sev
 
 
+def for_rules(qs):
+    """Rows as the rules need them: the node, and only the first RULE_BODY_BYTES of the body, cut in
+    the database, so classifying never pulls a full-size body into the worker."""
+    head = Func(F("body_sample"), function="substring",
+                template=f"%(function)s(%(expressions)s from 1 for {sigma.RULE_BODY_BYTES})", output_field=BinaryField())
+    return qs.select_related("node").defer("body_sample").annotate(body_head=head)
+
+
 def classify_events(ids, rules=None) -> int:
     rules = ruleset() if rules is None else rules
-    rows = list(Event.objects.filter(pk__in=ids).select_related("node"))
     now = timezone.now()
-    changed = []
-    for e in rows:
-        labels, sev = classify_one(e, rules, e.node.domains)
-        e.labels, e.severity, e.classified_at = labels, sev, now
+    n, changed = 0, []
+
+    def flush():
+        nonlocal n, changed
+        if changed:
+            Event.objects.bulk_update(changed, ["labels", "severity", "classified_at"], batch_size=500)
+            n += len(changed)
+            changed = []
+
+    for e in for_rules(Event.objects.filter(pk__in=ids)).order_by("id").iterator(chunk_size=200):
+        e.labels, e.severity = classify_one(e, rules, e.node.domains)
+        e.classified_at = now
         changed.append(e)
-    if changed:
-        Event.objects.bulk_update(changed, ["labels", "severity", "classified_at"], batch_size=500)
-    return len(changed)
+        if len(changed) >= 500:
+            flush()
+    flush()
+    return n
 
 
 def test_rule(detection_text: str, n: int = 500, suppressed_by=()) -> dict:
@@ -76,7 +92,7 @@ def test_rule(detection_text: str, n: int = 500, suppressed_by=()) -> dict:
     det = sigma.parse_detection(detection_text)
     rules = ruleset()
     matched, sample = 0, []
-    qs = Event.objects.order_by("-id").select_related("node")[:n]
+    qs = for_rules(Event.objects.order_by("-id"))[:n]
     total = 0
     for e in qs:
         total += 1

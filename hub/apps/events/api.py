@@ -4,7 +4,7 @@ are returned as data for the page to render as text, never as markup."""
 from datetime import timedelta
 
 from django.db import connection
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from ninja import Router
 
@@ -16,6 +16,7 @@ from .models import Event
 router = Router(tags=["events"])
 
 MAX_HOURS = 24 * 30
+BODY_VIEW_BYTES = 1024 * 1024
 
 
 def _ua(headers) -> str:
@@ -58,10 +59,11 @@ def recent(request, n: int = 200, after: int | None = None):
     """Newest first by default; with `after=<id>` the events since that id, oldest first (polling)."""
     n = max(1, min(n, 500))
     names = _node_names()
+    rows = Event.objects.defer("body_sample")  # the live feed never needs the body, and it can be large
     if after is not None:
-        qs = Event.objects.filter(id__gt=after).order_by("id")[:n]
+        qs = rows.filter(id__gt=after).order_by("id")[:n]
         return [_compact(e, names) for e in qs]
-    qs = Event.objects.order_by("-id")[:n]
+    qs = rows.order_by("-id")[:n]
     return [_compact(e, names) for e in qs]
 
 
@@ -150,6 +152,19 @@ def summary(request, hours: int = 168, labels: str | None = None):
     }
 
 
+@router.get("/events/{int:event_id}/body")
+def body_download(request, event_id: int):
+    """The stored request body, byte for byte, as a file."""
+    try:
+        e = Event.objects.only("body_sample", "body_sha256", "id").get(pk=event_id)
+    except Event.DoesNotExist as err:
+        raise Http404 from err
+    resp = HttpResponse(bytes(e.body_sample or b""), content_type="application/octet-stream")
+    resp["Content-Disposition"] = f'attachment; filename="event-{e.id}-body.bin"'
+    resp["X-Body-SHA256"] = e.body_sha256
+    return resp
+
+
 @router.get("/events/{int:event_id}")
 def detail(request, event_id: int):
     try:
@@ -157,6 +172,7 @@ def detail(request, event_id: int):
     except Event.DoesNotExist as err:
         raise Http404 from err
     body = bytes(e.body_sample or b"")
+    # The modal shows at most 1 MiB as text; the raw bytes are a download away (/events/{id}/body).
     return {
         "id": e.id,
         "ts": e.ts.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
@@ -169,8 +185,8 @@ def detail(request, event_id: int):
         "target": e.target, "path": e.path, "query": e.query,
         "headers": e.headers, "hdr_fp": e.hdr_fp, "content_type": e.content_type,
         "declared_length": e.declared_len, "body_bytes_read": e.read_len, "truncated": e.truncated,
-        "body_stored": len(body), "body_sha256": e.body_sha256,
-        "body": body.decode("latin-1"),
+        "body_stored": len(body), "body_shown": min(len(body), BODY_VIEW_BYTES), "body_sha256": e.body_sha256,
+        "body": body[:BODY_VIEW_BYTES].decode("latin-1"),
         "multipart": e.multipart, "flags": e.flags, "resp": e.resp, "dur_ms": e.dur_ms,
         "labels": e.labels, "sev": e.sev,
     }

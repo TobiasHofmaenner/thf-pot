@@ -19,7 +19,9 @@ from .models import Node
 log = logging.getLogger(__name__)
 router = Router(tags=["nodes"])
 
-MAX_BATCH_BYTES = 16 * 1024 * 1024  # decompressed; a node batch is at most 1 MiB
+# Decompressed. A node batch is at most 1 MiB, unless one record carries a full-size body: 64 MiB
+# read on the node is ~86 MiB of base64 in the line. The node itself skips lines above 128 MiB.
+MAX_BATCH_BYTES = 128 * 1024 * 1024
 
 
 class NodeAuth(HttpBearer):
@@ -50,9 +52,9 @@ def _decode_body(request) -> bytes:
 @router.post("/ingest", auth=auth, response={202: dict})
 def ingest(request):
     node = request.auth
-    data = _decode_body(request)
+    lines = _decode_body(request).splitlines()  # a batch may be one ~90 MB line: keep one copy, not two
     records, bad_lines = [], 0
-    for line in data.splitlines():
+    for line in lines:
         if not line.strip():
             continue
         try:

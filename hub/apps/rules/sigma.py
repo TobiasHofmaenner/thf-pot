@@ -73,6 +73,7 @@ FIELDS: dict[str, FieldSpec] = {
     "self": FieldSpec("bool", None, None, "request from an operator address"),
 }
 HEADER_PREFIX = "header."
+RULE_BODY_BYTES = 1024 * 1024
 STR_OPS = ("eq", "contains", "startswith", "endswith", "re")
 NUM_OPS = ("eq", "gt", "gte", "lt", "lte")
 
@@ -331,7 +332,10 @@ def context(e, known_hosts=()) -> dict:
     for k, v in headers:
         hdr.setdefault(str(k).lower(), str(v))
     mp = e.multipart or {}
-    body = bytes(e.body_sample or b"").decode("latin-1")
+    # Rules see the first MiB: enough for any payload we have met, and bounded regex cost per event.
+    # engine.for_rules() already cuts it in the database (body_head); a plain row is cut here.
+    raw = e.body_head if hasattr(e, "body_head") else e.body_sample
+    body = bytes(raw or b"")[:RULE_BODY_BYTES].decode("latin-1")
     ctx = {
         "method": e.method, "path": e.path, "query": e.query, "target": e.target or e.path,
         "host": e.host, "ua": hdr.get("user-agent", ""), "content_type": e.content_type,

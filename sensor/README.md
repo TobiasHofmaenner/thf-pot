@@ -47,7 +47,7 @@ Day files are deleted after `RETAIN_DAYS` (30) only once fully shipped.
 | `SELF_NETS` | RFC1918 + loopback | networks treated as self |
 | `TRUST_PROXY` | `0` | take the source from `X-Real-IP` / `X-Forwarded-For` (only behind your own proxy) |
 | `MAX_READ_BYTES` | 64 MiB | body bytes read from the client at most |
-| `MAX_STORE_BYTES` | 64 KiB | body bytes kept in the record |
+| `MAX_STORE_BYTES` | 64 MiB (= everything read) | body bytes kept in the record |
 | `LOG_DIR` | `/data` | events, shipper cursor and certificate cache |
 | `RETAIN_DAYS` | `30` | delete day files older than this once shipped; `0` keeps all |
 | `PROFILES_FILE` | `/profiles.toml` | persona selection (see below) |

@@ -16,7 +16,9 @@ from .models import Node
 
 log = logging.getLogger(__name__)
 
-MAX_SAMPLE = 1024 * 1024
+# The node stores everything it reads (MAX_READ_BYTES, 64 MiB); the hub keeps the same amount so
+# nothing is lost between the two, and never more, whatever a node claims.
+MAX_SAMPLE = 64 * 1024 * 1024
 KNOWN_KEYS = {"v", "id", "ts", "src", "src_port", "self", "http", "host", "body", "multipart", "flags", "resp", "dur_ms"}
 
 
@@ -59,7 +61,7 @@ def to_event(node: Node, rec: dict) -> Event:
     ctype = next((v for k, v in headers if k == "content-type"), "")
 
     sample = None
-    b64 = body.get("sample_b64")
+    b64 = body.pop("sample_b64", None) if isinstance(body, dict) else None  # drop the base64 once decoded
     if isinstance(b64, str) and b64:
         try:
             sample = base64.b64decode(b64, validate=True)[:MAX_SAMPLE]

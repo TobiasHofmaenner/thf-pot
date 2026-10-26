@@ -45,8 +45,10 @@ INSTALLED_APPS = [
     "apps.rules",
 ]
 
-# Node batches: up to 500 records / 1 MiB gzip per POST (docs/PROTOCOL.md); the ingress allows 8m.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 8 * 1024 * 1024
+# Node batches: up to 500 records / 1 MiB per POST, except that one record may carry a full-size
+# body (MAX_READ_BYTES on the node, 64 MiB, ~86 MiB as base64) and then ships alone. The ingress
+# allows 96m to match (thf-infra, ingress-ingest.yaml).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 96 * 1024 * 1024
 # What the node page tells a new node to run and where to report.
 SENSOR_IMAGE = env("SENSOR_IMAGE", "ghcr.io/tobiashofmaenner/thf-pot-node:main")
 HUB_PUBLIC_URL = env("HUB_PUBLIC_URL")  # default: derived from the request

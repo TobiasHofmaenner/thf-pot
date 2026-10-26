@@ -19,7 +19,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 256m
+    mem_limit: 512m   # a full-size body (up to MAX_READ_BYTES, 64 MiB) is held in memory while it is recorded
     pids_limit: 64
     logging:
       driver: json-file

@@ -154,6 +154,18 @@ class SeedRuleTests(TestCase):
         self.assertEqual(plain.labels, [])
         self.assertIsNone(plain.severity)
 
+    def test_a_full_size_body_is_classified_on_its_head_cut_in_the_database(self):
+        body = b"<?php " + b"x" * sigma.RULE_BODY_BYTES + b"ZZTAIL"
+        e = mk_event(self.s, method="POST", path="/vendor/phpunit/src/Util/PHP/eval-stdin.php", body_sample=body)
+        self.assertEqual(engine.classify_events([e.id]), 1)
+        e.refresh_from_db()
+        self.assertIn("PHPUnit eval-stdin", e.labels)
+        row = engine.for_rules(Event.objects.filter(pk=e.pk)).get()
+        self.assertEqual(len(bytes(row.body_head)), sigma.RULE_BODY_BYTES)
+        self.assertIn("body_sample", row.get_deferred_fields())
+        self.assertEqual(engine.test_rule("a:\n  body|contains: '<?php'\ncondition: a", n=5)["matched"], 1)
+        self.assertEqual(engine.test_rule("a:\n  body|contains: ZZTAIL\ncondition: a", n=5)["matched"], 0)
+
 
 class ExportTests(TestCase):
     def rule(self, detection, **kw):

@@ -30,12 +30,29 @@ pub struct HeartbeatReply {
     pub your_ip: Option<IpAddr>,
 }
 
+/// The hub answered, and said no. Unlike an outage this will not change on retry.
+#[derive(Debug)]
+pub struct Rejected {
+    pub status: u16,
+    pub text: String,
+}
+
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "hub answered {}: {}", self.status, self.text)
+    }
+}
+
+impl std::error::Error for Rejected {}
+
 impl Client {
     pub fn new(cfg: &Config) -> anyhow::Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
                 .user_agent(concat!("thf-pot-sensor/", env!("CARGO_PKG_VERSION")))
-                .timeout(Duration::from_secs(30))
+                // Long enough for a single-record batch carrying a full-size body (~68 MiB gzip)
+                // to upload and be stored; Cloudflare in front of the hub allows 100 s.
+                .timeout(Duration::from_secs(90))
                 .build()?,
             base: cfg.hub_url.clone(),
             token: cfg.sensor_token.clone(),
@@ -85,7 +102,7 @@ impl Client {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!("hub answered {status}: {}", text.chars().take(200).collect::<String>());
+            return Err(Rejected { status: status.as_u16(), text: text.chars().take(200).collect() }.into());
         }
         Ok(())
     }

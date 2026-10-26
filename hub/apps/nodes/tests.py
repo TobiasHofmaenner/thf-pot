@@ -69,6 +69,16 @@ class IngestTests(TestCase):
         self.assertEqual(r.status_code, 202)
         self.assertEqual(r.json(), {"accepted": 1, "duplicates": 0, "rejected": 2})
 
+    def test_a_full_size_body_is_stored_whole(self):
+        import base64
+
+        raw = bytes(range(256)) * (8 * 1024) + b"END"  # 2 MiB: above the hub's former 1 MiB cap
+        body = {"declared_len": len(raw), "read_len": len(raw), "truncated": False, "sha256": "ab" * 32,
+                "sample_b64": base64.b64encode(raw).decode()}
+        r = self.post(ndjson_gz([record("01JAX00000000000000000000A", body=body)]))
+        self.assertEqual(r.status_code, 202, r.content)
+        self.assertEqual(bytes(Event.objects.get().body_sample), raw)
+
     def test_unknown_keys_land_in_extra(self):
         r = self.post(ndjson_gz([record("01JAX000000000000000000005", future_field={"x": 1})]))
         self.assertEqual(r.status_code, 202)

@@ -112,7 +112,9 @@ impl Config {
                 env("PROFILES_FILE").unwrap_or_else(|| "/profiles.toml".into()),
             ),
             max_read: env_num("MAX_READ_BYTES", 64 * 1024 * 1024),
-            max_store: env_num("MAX_STORE_BYTES", 64 * 1024),
+            // Default: keep everything that was read. A honeypot that truncates the payload keeps the
+            // wrapping and throws away the gift; memory is bounded by MAX_READ_BYTES per request.
+            max_store: env_num("MAX_STORE_BYTES", 64 * 1024 * 1024),
             self_ips,
             self_nets,
             trust_proxy: env_bool("TRUST_PROXY", false),

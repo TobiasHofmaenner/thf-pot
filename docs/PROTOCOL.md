@@ -7,7 +7,9 @@ data and is treated as untrusted on the hub.
 ## `POST /api/v1/ingest`
 
 - `Content-Type: application/x-ndjson`, `Content-Encoding: gzip`
-- Body: up to 500 event records, one JSON object per line, schema v1 below.
+- Body: up to 500 event records, one JSON object per line, schema v1 below. A batch is at most 1 MiB,
+  except that a single record carrying a full-size body may be larger and is then sent on its own
+  (the hub accepts up to 96 MiB per POST).
 - Response `202 Accepted` with `{"accepted": n, "duplicates": m}`. Any 2xx acknowledges the
   whole batch. Non-2xx means the sensor keeps the batch and retries with backoff; it will resend
   the same records, so the hub **must** dedupe on `id`.
@@ -47,7 +49,7 @@ A sensor whose heartbeat stops is itself a signal.
   },
   "host": "example.org",
   "body": { "declared_len": 321, "read_len": 321, "truncated": false,
-            "sha256": "...", "sample_b64": "..." },           // sample = first MAX_STORE_BYTES
+            "sha256": "...", "sample_b64": "..." },           // sample = first MAX_STORE_BYTES (default: all of it, up to the 64 MiB read cap)
   "multipart": { "boundary": "...", "parts": 4, "preamble_len": 0, "epilogue_len": 2,
                  "max_headers_in_part": 2, "max_name_depth": 0, "file_parts": 1,
                  "empty_file_parts": 0, "session_upload_progress": true, "names_sample": [...] },

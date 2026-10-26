@@ -100,10 +100,26 @@ class EventsApiTests(TestCase):
         e = mk_event(self.s, body_sample=b"a=1&b=\xff", multipart={"boundary": "x", "parts": 2})
         d = self.client.get(f"/api/v1/events/{e.id}").json()
         self.assertEqual(d["body"], "a=1&b=\xff")
-        self.assertEqual(d["body_stored"], 7)
+        self.assertEqual((d["body_stored"], d["body_shown"]), (7, 7))
         self.assertEqual(d["multipart"]["boundary"], "x")
         self.assertEqual(d["node"], "s1")
         self.assertEqual(self.client.get("/api/v1/events/999999").status_code, 404)
+
+    def test_detail_shows_at_most_a_mebibyte_and_the_download_has_it_all(self):
+        from .api import BODY_VIEW_BYTES
+
+        body = b"x" * BODY_VIEW_BYTES + b"TAIL"
+        e = mk_event(self.s, body_sample=body, body_sha256="ab" * 32)
+        d = self.client.get(f"/api/v1/events/{e.id}").json()
+        self.assertEqual((d["body_stored"], d["body_shown"], len(d["body"])), (len(body), BODY_VIEW_BYTES, BODY_VIEW_BYTES))
+        r = self.client.get(f"/api/v1/events/{e.id}/body")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "application/octet-stream")
+        self.assertEqual(r["X-Body-SHA256"], "ab" * 32)
+        self.assertEqual(r.content, body)
+        self.assertEqual(self.client.get("/api/v1/events/999999/body").status_code, 404)
+        # the live feed leaves the body behind
+        self.assertEqual(self.client.get("/api/v1/events/recent?n=1").json()[0]["id"], e.id)
 
     def test_dashboard_renders(self):
         r = self.client.get("/")
