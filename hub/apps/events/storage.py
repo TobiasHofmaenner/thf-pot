@@ -14,8 +14,10 @@ from django.db.models.functions import Coalesce
 
 from .models import Body, Event
 
-CACHE_KEY = "thf-pot:storage"
-LAST_SWEEP_KEY = "thf-pot:retention:last"
+# Versioned: during a rollout old and new pods share the cache, and a dict of the old shape must not
+# reach a new template.
+CACHE_KEY = "thf-pot:storage:2"
+LAST_SWEEP_KEY = "thf-pot:retention:last:2"
 CRITICAL_PCT = 95
 
 
