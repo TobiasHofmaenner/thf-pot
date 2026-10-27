@@ -15,7 +15,10 @@ pub struct Store {
 
 impl Store {
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir, lock: Mutex::new(()) }
+        Self {
+            dir,
+            lock: Mutex::new(()),
+        }
     }
 
     pub fn file_for_day(&self, day: &str) -> PathBuf {

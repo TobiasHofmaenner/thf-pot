@@ -12,7 +12,7 @@ from django.db import connection
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 
-from .models import Body, Event
+from .models import Body, Event, MintedToken
 
 # Versioned: during a rollout old and new pods share the cache, and a dict of the old shape must not
 # reach a new template.
@@ -63,9 +63,10 @@ def usage(fresh: bool = False) -> dict:
             return hit
     with connection.cursor() as cur:
         cur.execute(
-            "select pg_database_size(current_database()), pg_total_relation_size('events_body'), pg_total_relation_size('events_event')"
+            "select pg_database_size(current_database()), pg_total_relation_size('events_body'), "
+            "pg_total_relation_size('events_event'), pg_total_relation_size('events_mintedtoken')"
         )
-        db_bytes, bodies_disk, events_disk = (int(x) for x in cur.fetchone())
+        db_bytes, bodies_disk, events_disk, tokens_disk = (int(x) for x in cur.fetchone())
     events, body_bytes, live = held()
     bodies = Body.objects.count()
     refs = Event.objects.filter(body__isnull=False).count()
@@ -86,6 +87,7 @@ def usage(fresh: bool = False) -> dict:
         "held_pct": round(100 * live / cap, 1) if cap else None,
         "events": {"count": events, "disk_bytes": events_disk, "oldest_ts": _iso(oldest)},
         "bodies": {"count": bodies, "bytes": body_bytes, "disk_bytes": bodies_disk, "refs": refs},
+        "tokens": {"count": MintedToken.objects.count(), "disk_bytes": tokens_disk},
         "retention": {"high_water": settings.RETENTION_HIGH_WATER, "low_water": settings.RETENTION_LOW_WATER,
                       "event_row_bytes": settings.EVENT_ROW_BYTES,
                       "event_days": settings.RETENTION_EVENT_DAYS, "body_days": settings.RETENTION_BODY_DAYS},

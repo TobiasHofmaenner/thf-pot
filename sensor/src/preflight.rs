@@ -28,7 +28,10 @@ pub async fn run(cfg: &Config, hub: &hub::Client, status: &Shared) {
     loop {
         attempt += 1;
         // 1. Learn our public address from the hub. Nothing proceeds without it.
-        let me = match hub.heartbeat(&status.get(), ("", 0), started.elapsed().as_secs()).await {
+        let me = match hub
+            .heartbeat(&status.get(), ("", 0), started.elapsed().as_secs())
+            .await
+        {
             Ok(reply) => reply.your_ip,
             Err(e) => {
                 warn!(error = %e, retry_in_s = 10, "preflight: hub unreachable");
@@ -47,7 +50,10 @@ pub async fn run(cfg: &Config, hub: &hub::Client, status: &Shared) {
         let mut domains = BTreeMap::new();
         let mut all_ok = true;
         for d in &cfg.domains {
-            let probe = d.strip_prefix("*.").map(|rest| format!("thf-pot-preflight.{rest}")).unwrap_or_else(|| d.clone());
+            let probe = d
+                .strip_prefix("*.")
+                .map(|rest| format!("thf-pot-preflight.{rest}"))
+                .unwrap_or_else(|| d.clone());
             let ips = resolve(&probe).await;
             let ok = ips.contains(&me);
             all_ok &= ok;
@@ -58,12 +64,16 @@ pub async fn run(cfg: &Config, hub: &hub::Client, status: &Shared) {
             info!(public_ip = %me, "preflight: all domains resolve to this node");
             status.set("dns_ok", detail);
             // Report the good news before the TLS listener starts.
-            let _ = hub.heartbeat(&status.get(), ("", 0), started.elapsed().as_secs()).await;
+            let _ = hub
+                .heartbeat(&status.get(), ("", 0), started.elapsed().as_secs())
+                .await;
             return;
         }
         warn!(public_ip = %me, "preflight: DNS mismatch; not starting until it is fixed (re-check in {}s)", RETRY.as_secs());
         status.set("dns_failed", detail);
-        let _ = hub.heartbeat(&status.get(), ("", 0), started.elapsed().as_secs()).await;
+        let _ = hub
+            .heartbeat(&status.get(), ("", 0), started.elapsed().as_secs())
+            .await;
         tokio::time::sleep(RETRY).await;
     }
 }

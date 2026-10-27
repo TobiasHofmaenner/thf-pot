@@ -9,8 +9,8 @@ from django.utils import timezone
 
 from apps.nodes.models import Node
 
-from . import geo, retention, storage, tasks
-from .models import Body, Event
+from . import geo, minted, retention, storage, tasks
+from .models import Body, Event, MintedToken
 
 
 def mk_node(name="s1"):
@@ -158,6 +158,51 @@ class EventsApiTests(TestCase):
         self.assertContains(r, "DB-IP")
 
 
+class MintedTests(TestCase):
+    def setUp(self):
+        self.s = mk_node()
+
+    def token(self, key, at="cookie", event=None):
+        now = timezone.now()
+        return MintedToken.objects.create(key=key, node=self.s, event=event, at=at,
+                                          first_issued_at=now, last_issued_at=now)
+
+    def test_candidates_report_the_most_telling_position(self):
+        key = "a1b2c3d4e5f60718"
+        e = mk_event(self.s, query=f"id={key}", headers=[["cookie", f"PHPSESSID={key}ffff"]])
+        self.assertEqual(minted.candidates(e)[key], "query")  # a query beats a cookie header
+        e2 = mk_event(self.s, body_sample=f"form_token={key}".encode())
+        self.assertEqual(minted.candidates(e2, e2.body_bytes)[key], "body")
+        only_cookie = mk_event(self.s, headers=[["cookie", f"PHPSESSID={key}"]])
+        self.assertEqual(minted.candidates(only_cookie)[key], "cookie")
+        # a hex run shorter than a key is no candidate at all
+        self.assertEqual(minted.candidates(mk_event(self.s, query="id=deadbeef")), {})
+
+    def test_detect_marks_only_the_keys_we_issued(self):
+        mine, theirs = "0123456789abcdef", "fedcba9876543210"
+        self.token(mine, at="req:form_token")
+        hit = mk_event(self.s, body_sample=f"form_token={mine}".encode())
+        miss = mk_event(self.s, body_sample=f"form_token={theirs}".encode())
+        for e in (hit, miss):
+            e._sample = e.body_bytes
+        ids = {hit.ulid: hit.id, miss.ulid: miss.id}
+        self.assertEqual(minted.detect([hit, miss], ids), 1)
+        hit.refresh_from_db()
+        miss.refresh_from_db()
+        self.assertEqual((hit.minted_return, hit.minted_return_key), ("body", mine))
+        self.assertEqual((miss.minted_return, miss.minted_return_key), ("", ""))
+        d = self.client.get(f"/api/v1/events/{hit.id}").json()["minted_returned"]
+        self.assertEqual((d["where"], d["at"], d["node"]), ("body", "req:form_token", "s1"))
+        self.assertIsNone(self.client.get(f"/api/v1/events/{miss.id}").json()["minted_returned"])
+
+    def test_a_request_value_dies_with_its_answer_and_a_node_value_does_not(self):
+        e = mk_event(self.s)
+        self.token("1111111111111111", at="req:form_token", event=e)
+        self.token("2222222222222222", at="node:upload_tmp_dir", event=None)
+        Event.objects.filter(pk=e.pk).delete()
+        self.assertEqual(list(MintedToken.objects.values_list("key", flat=True)), ["2222222222222222"])
+
+
 class StorageTests(TestCase):
     def setUp(self):
         cache.delete(storage.CACHE_KEY)
@@ -178,6 +223,7 @@ class StorageTests(TestCase):
         self.assertEqual(u["retention"], {"high_water": 0.8, "low_water": 0.7, "event_row_bytes": 1000, "event_days": 0, "body_days": 0})
         self.assertIsNone(u["last_sweep"])
         self.assertEqual(self.client.get("/api/v1/storage").json()["events"]["count"], 3)
+        self.assertEqual(u["tokens"], {"count": 0, "disk_bytes": u["tokens"]["disk_bytes"]})
         r = self.client.get("/_storage")
         self.assertContains(r, "3 rows")
         self.assertContains(r, "above 7.8 KiB (80 %)")

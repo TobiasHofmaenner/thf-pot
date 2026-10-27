@@ -11,6 +11,7 @@ mod bundle;
 mod capture;
 mod config;
 mod hub;
+mod mint;
 mod multipart;
 mod preflight;
 mod profiles;
@@ -52,7 +53,10 @@ async fn main() -> anyhow::Result<()> {
     );
 
     if cfg.domains.is_empty() {
-        status.set("ready", serde_json::json!({ "tls": "disabled", "dns": "skipped" }));
+        status.set(
+            "ready",
+            serde_json::json!({ "tls": "disabled", "dns": "skipped" }),
+        );
     } else {
         // Blocks until every domain resolves to this node; nothing listens before that. Behind a
         // TLS-terminating proxy (HTTP_ONLY) the check is just as valid; only the certificate phase is
@@ -67,6 +71,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    tokio::spawn(shipper::run(cfg.clone(), store.clone(), hub.clone(), status.clone()));
+    tokio::spawn(shipper::run(
+        cfg.clone(),
+        store.clone(),
+        hub.clone(),
+        status.clone(),
+    ));
     server::serve(cfg, profiles, store, status).await
 }

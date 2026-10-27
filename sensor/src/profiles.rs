@@ -67,7 +67,8 @@ impl Profile {
         {
             return false;
         }
-        if !self.prefixes.is_empty() && !self.prefixes.iter().any(|p| path.starts_with(p.as_str())) {
+        if !self.prefixes.is_empty() && !self.prefixes.iter().any(|p| path.starts_with(p.as_str()))
+        {
             return false;
         }
         true
@@ -97,18 +98,19 @@ impl Profiles {
                     b
                 }
             };
-            let nets = d
-                .m
-                .cidr
-                .iter()
-                .map(|c| {
-                    // Accept a bare address as a /32 or /128.
-                    c.parse::<IpNet>().or_else(|_| {
-                        c.parse::<IpAddr>().map(IpNet::from).map_err(|e| anyhow::anyhow!("{c}: {e}"))
+            let nets =
+                d.m.cidr
+                    .iter()
+                    .map(|c| {
+                        // Accept a bare address as a /32 or /128.
+                        c.parse::<IpNet>().or_else(|_| {
+                            c.parse::<IpAddr>()
+                                .map(IpNet::from)
+                                .map_err(|e| anyhow::anyhow!("{c}: {e}"))
+                        })
                     })
-                })
-                .collect::<anyhow::Result<Vec<_>>>()
-                .with_context(|| format!("profile {}: cidr", d.name))?;
+                    .collect::<anyhow::Result<Vec<_>>>()
+                    .with_context(|| format!("profile {}: cidr", d.name))?;
             list.push(Profile {
                 name: d.name,
                 bundle,

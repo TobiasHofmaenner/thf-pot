@@ -61,7 +61,12 @@ impl Client {
     }
 
     /// Tell the hub how we are; it tells us the address it saw us from.
-    pub async fn heartbeat(&self, st: &NodeState, cursor: (&str, u64), uptime_s: u64) -> anyhow::Result<HeartbeatReply> {
+    pub async fn heartbeat(
+        &self,
+        st: &NodeState,
+        cursor: (&str, u64),
+        uptime_s: u64,
+    ) -> anyhow::Result<HeartbeatReply> {
         let hb = Heartbeat {
             ts: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             version: env!("CARGO_PKG_VERSION"),
@@ -102,7 +107,11 @@ impl Client {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(Rejected { status: status.as_u16(), text: text.chars().take(200).collect() }.into());
+            return Err(Rejected {
+                status: status.as_u16(),
+                text: text.chars().take(200).collect(),
+            }
+            .into());
         }
         Ok(())
     }

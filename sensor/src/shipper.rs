@@ -98,7 +98,9 @@ fn next_batch(dir: &Path, cur: &mut Cursor) -> anyhow::Result<Option<(Vec<u8>, u
     }
     f.seek(SeekFrom::Start(cur.offset))?;
     let mut buf = Vec::with_capacity(MAX_BATCH_BYTES.min((len - cur.offset) as usize + 1));
-    (&mut f).take(MAX_BATCH_BYTES as u64).read_to_end(&mut buf)?;
+    (&mut f)
+        .take(MAX_BATCH_BYTES as u64)
+        .read_to_end(&mut buf)?;
 
     // A record longer than a whole batch (a request with a full-size body): read to its newline
     // and ship it on its own.
@@ -165,7 +167,8 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
     loop {
         let dir = store.dir.clone();
         let mut c = cur.clone();
-        let batch = tokio::task::spawn_blocking(move || next_batch(&dir, &mut c).map(|b| (b, c))).await;
+        let batch =
+            tokio::task::spawn_blocking(move || next_batch(&dir, &mut c).map(|b| (b, c))).await;
         // Housekeeping below must run on every pass, including during a hub outage, so failures
         // adjust the pause instead of short-circuiting the loop.
         let mut pause = Duration::from_secs(cfg.ship_interval_secs);
@@ -175,7 +178,10 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
                 match gzip(&bytes) {
                     Ok(gz) => match hub.ingest(gz).await {
                         Ok(()) => {
-                            cur = Cursor { file: advanced.file, offset: new_offset };
+                            cur = Cursor {
+                                file: advanced.file,
+                                offset: new_offset,
+                            };
                             if let Err(e) = cur.save(&cursor_path) {
                                 warn!(error = %e, "cursor save failed");
                             }
@@ -187,9 +193,16 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
                         // everything behind it. Leave it in the day file (RETAIN_DAYS still applies)
                         // and move on; a whole batch refused that way is a configuration mismatch
                         // and keeps being retried, loudly.
-                        Err(e) if lines == 1 && e.downcast_ref::<hub::Rejected>().is_some_and(|r| r.status == 413) => {
+                        Err(e)
+                            if lines == 1
+                                && e.downcast_ref::<hub::Rejected>()
+                                    .is_some_and(|r| r.status == 413) =>
+                        {
                             warn!(error = %e, bytes = bytes.len(), file = %advanced.file, "hub refused the record as too large; skipped, kept on disk");
-                            cur = Cursor { file: advanced.file, offset: new_offset };
+                            cur = Cursor {
+                                file: advanced.file,
+                                offset: new_offset,
+                            };
                             if let Err(e) = cur.save(&cursor_path) {
                                 warn!(error = %e, "cursor save failed");
                             }
@@ -216,7 +229,14 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
         // visible in the ship failures above and must not double the log noise.
         if last_hb.is_none_or(|t| t.elapsed() >= Duration::from_secs(cfg.heartbeat_secs)) {
             last_hb = Some(Instant::now());
-            if let Err(e) = hub.heartbeat(&status.get(), (&cur.file, cur.offset), started.elapsed().as_secs()).await {
+            if let Err(e) = hub
+                .heartbeat(
+                    &status.get(),
+                    (&cur.file, cur.offset),
+                    started.elapsed().as_secs(),
+                )
+                .await
+            {
                 warn!(error = %e, "heartbeat failed");
             }
         }
@@ -226,7 +246,10 @@ pub async fn run(cfg: Arc<Config>, store: Arc<Store>, hub: Arc<hub::Client>, sta
             let _ = tokio::task::spawn_blocking(move || prune(&dir, &c, days)).await;
         }
         // A state change (certificate obtained, renewal failed, …) is reported at once.
-        if tokio::time::timeout(pause, status.changed.notified()).await.is_ok() {
+        if tokio::time::timeout(pause, status.changed.notified())
+            .await
+            .is_ok()
+        {
             last_hb = None;
         }
     }
@@ -255,8 +278,15 @@ mod tests {
     fn a_record_larger_than_a_batch_ships_alone_and_nothing_is_skipped() {
         let d = scratch("big");
         let small = "{\"v\":1}\n";
-        let big = format!("{{\"v\":1,\"b\":\"{}\"}}\n", "A".repeat(MAX_BATCH_BYTES + 4096));
-        std::fs::write(d.join("events-2026-10-26.jsonl"), format!("{small}{big}{small}")).unwrap();
+        let big = format!(
+            "{{\"v\":1,\"b\":\"{}\"}}\n",
+            "A".repeat(MAX_BATCH_BYTES + 4096)
+        );
+        std::fs::write(
+            d.join("events-2026-10-26.jsonl"),
+            format!("{small}{big}{small}"),
+        )
+        .unwrap();
         let mut cur = Cursor::default();
 
         let (b, n) = take(&d, &mut cur).unwrap();
@@ -273,7 +303,11 @@ mod tests {
     #[test]
     fn a_big_record_still_being_written_waits() {
         let d = scratch("partial");
-        std::fs::write(d.join("events-2026-10-26.jsonl"), "A".repeat(MAX_BATCH_BYTES + 10)).unwrap();
+        std::fs::write(
+            d.join("events-2026-10-26.jsonl"),
+            "A".repeat(MAX_BATCH_BYTES + 10),
+        )
+        .unwrap();
         let mut cur = Cursor::default();
         assert!(take(&d, &mut cur).is_none());
         assert_eq!(cur.offset, 0);

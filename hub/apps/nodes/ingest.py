@@ -11,7 +11,8 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone as dj_tz
 
-from apps.events.models import Body, Event
+from apps.events import minted
+from apps.events.models import Body, Event, MintedToken
 
 from .models import Node
 
@@ -72,6 +73,10 @@ def to_event(node: Node, rec: dict) -> Event:
     flags = [_s(f, 64) for f in (rec.get("flags") or []) if isinstance(f, str)][:64]
     extra = {k: v for k, v in rec.items() if k not in KNOWN_KEYS} or None
 
+    resp = rec.get("resp") if isinstance(rec.get("resp"), dict) else {}
+    minted_pairs = _minted_pairs(resp)
+    resp = {k: v for k, v in resp.items() if k != "minted"}  # the keys live in their own table
+
     e = Event(
         node=node,
         ulid=ulid,
@@ -97,12 +102,51 @@ def to_event(node: Node, rec: dict) -> Event:
         body_size=len(sample) if sample else 0,
         multipart=rec.get("multipart") if isinstance(rec.get("multipart"), dict) else None,
         flags=flags,
-        resp=rec.get("resp") if isinstance(rec.get("resp"), dict) else {},
+        resp=resp,
         dur_ms=_int(rec.get("dur_ms"), 0),
         extra=extra,
     )
     e._sample = sample  # attached to a Body row by ingest_batch, once per distinct hash
+    e._minted = minted_pairs  # turned into MintedToken rows by ingest_batch
     return e
+
+
+def _minted_pairs(resp: dict) -> list[tuple[str, str]]:
+    """The (where, key) pairs an answer reported handing out. Node-reported like everything else in
+    a record, so the shape is checked rather than trusted."""
+    items = resp.get("minted")
+    if not isinstance(items, list):
+        return []
+    out = []
+    for item in items[:32]:
+        if isinstance(item, list) and len(item) == 2 and all(isinstance(x, str) for x in item):
+            key = item[1].lower()
+            if minted.is_key(key):
+                out.append((_s(item[0], 40), key))
+    return out
+
+
+def _store_minted(node: Node, events: list, ids: dict) -> None:
+    """One row per distinct key this batch's answers handed out."""
+    seen: dict[str, tuple] = {}
+    for e in events:
+        for at, key in getattr(e, "_minted", ()):
+            # A node-scoped value belongs to the node rather than to one answer, so it is stored
+            # without an event and outlives that event's retention.
+            ev = None if at.startswith("node:") else ids.get(e.ulid)
+            prev = seen.get(key)
+            seen[key] = (at, max(e.ts, prev[1]) if prev else e.ts, (prev[2] if prev and prev[2] else ev))
+    if not seen:
+        return
+    existing = set(MintedToken.objects.filter(key__in=list(seen)).values_list("key", flat=True))
+    MintedToken.objects.bulk_create(
+        [MintedToken(key=k, node=node, event_id=ev, at=at, first_issued_at=ts, last_issued_at=ts)
+         for k, (at, ts, ev) in seen.items() if k not in existing],
+        ignore_conflicts=True,
+        batch_size=500,
+    )
+    for k in existing:  # a node-scoped value handed out again
+        MintedToken.objects.filter(key=k, last_issued_at__lt=seen[k][1]).update(last_issued_at=seen[k][1])
 
 
 def _attach_bodies(events: list) -> None:
@@ -158,7 +202,7 @@ def ingest_batch(node: Node, records: list) -> dict:
             unique.append(e)
     duplicates = len(events) - len(unique)
 
-    accepted = 0
+    accepted, returns = 0, 0
     if unique:
         with transaction.atomic():
             existing = set(
@@ -178,7 +222,16 @@ def ingest_batch(node: Node, records: list) -> dict:
                     last_seen_at=dj_tz.now(),
                 )
                 ulids = [e.ulid for e in new]
+                # bulk_create with ignore_conflicts cannot report the new ids, so look them up once
+                # and use them for the values these answers handed out and the ones they carried back.
+                ids = dict(Event.objects.filter(node=node, ulid__in=ulids).values_list("ulid", "id"))
+                _store_minted(node, new, ids)
+                returns = minted.detect(new, ids)
                 transaction.on_commit(lambda: _enqueue_geo(node.pk, ulids))
     if not accepted:
         Node.objects.filter(pk=node.pk).update(last_seen_at=dj_tz.now())
-    return {"accepted": accepted, "duplicates": duplicates, "rejected": rejected}
+    out = {"accepted": accepted, "duplicates": duplicates, "rejected": rejected}
+    if returns:
+        out["minted_returns"] = returns
+        log.info("node %s: %d request(s) carried back a value we minted", node.name, returns)
+    return out

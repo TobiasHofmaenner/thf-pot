@@ -26,6 +26,7 @@ def storage_fragment(request):
         "high_pct": round(r["high_water"] * 100), "low_pct": round(r["low_water"] * 100),
         "events_disk": storage.human(u["events"]["disk_bytes"]),
         "bodies_live": storage.human(u["bodies"]["bytes"]), "bodies_disk": storage.human(u["bodies"]["disk_bytes"]),
+        "tokens_disk": storage.human(u["tokens"]["disk_bytes"]),
         "time_rules": ", ".join(x for x in (
             f"events older than {r['event_days']} days are deleted" if r["event_days"] else "",
             f"bodies of events older than {r['body_days']} days are released" if r["body_days"] else "")

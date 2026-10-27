@@ -6,7 +6,7 @@ import json
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.events.models import Body, Event
+from apps.events.models import Body, Event, MintedToken
 
 from .models import Node
 from .views import parse_domains
@@ -94,6 +94,28 @@ class IngestTests(TestCase):
         other = dict(record(a)["body"], sample_b64=base64.b64encode(b"xyz").decode())
         self.post(ndjson_gz([record("01JAX00000000000000000000E", body=other)]))
         self.assertEqual(Body.objects.count(), 2)
+
+    def test_minted_values_are_stored_and_a_return_is_detected(self):
+        key, node_key = "aaaabbbbccccdddd", "1111222233334444"
+        first = record("01JAX00000000000000000000F")
+        first["resp"] = dict(first["resp"], minted=[["cookie", key], ["node:upload_tmp_dir", node_key], ["bad", "nothex"]])
+        self.assertEqual(self.post(ndjson_gz([first])).status_code, 202)
+        ev = Event.objects.get()
+        self.assertNotIn("minted", ev.resp)  # lifted out of the record into its own table
+        self.assertEqual(MintedToken.objects.count(), 2)  # the malformed pair is dropped
+        self.assertEqual(MintedToken.objects.get(key=key).event_id, ev.id)
+        self.assertIsNone(MintedToken.objects.get(key=node_key).event_id)  # belongs to the node
+
+        later = record("01JAX00000000000000000000G", ts="2026-10-23T13:00:00Z")
+        later["http"] = dict(later["http"], query=f"sid={key}", target=f"/index.php?sid={key}")
+        self.assertEqual(self.post(ndjson_gz([later])).json()["minted_returns"], 1)
+        back = Event.objects.get(ulid="01JAX00000000000000000000G")
+        self.assertEqual((back.minted_return, back.minted_return_key), ("query", key))
+        # the node-scoped value handed out again: still one row, last_issued_at moves on
+        again = record("01JAX00000000000000000000H", ts="2026-10-24T09:00:00Z")
+        again["resp"] = dict(again["resp"], minted=[["node:upload_tmp_dir", node_key]])
+        self.post(ndjson_gz([again]))
+        self.assertEqual((MintedToken.objects.count(), MintedToken.objects.get(key=node_key).last_issued_at.day), (2, 24))
 
     def test_unknown_keys_land_in_extra(self):
         r = self.post(ndjson_gz([record("01JAX000000000000000000005", future_field={"x": 1})]))

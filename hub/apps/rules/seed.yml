@@ -342,3 +342,18 @@
       host|re: '.'
       host_known: false
     condition: other
+- name: read our answer
+  title: A request carried back a value one of our answers handed out
+  severity: 1
+  tags: [targeting, structural]
+  description: >
+    Every answer hands out values its requester cannot know in advance: a session identifier, a form
+    token, a path shown in the info page. A request carrying one back proves its sender read us
+    rather than firing something prepared beforehand, which is the difference between a blind attempt
+    and a measured one. A return in a body, a path or a query means the value was read and put to
+    use; a Cookie header on its own may be no more than a client that keeps cookies, so that position
+    is recorded on the event but not labelled here.
+  detection: |
+    read_and_reused:
+      minted_return: [body, query, path, header]
+    condition: read_and_reused

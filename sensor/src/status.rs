@@ -40,7 +40,11 @@ impl Status {
         let mut s = self.inner.lock().unwrap();
         if s.state != state || s.detail != detail {
             tracing::info!(state, detail = %detail, "node state");
-            *s = NodeState { state: state.into(), detail, since: now() };
+            *s = NodeState {
+                state: state.into(),
+                detail,
+                since: now(),
+            };
             self.changed.notify_one();
         }
     }

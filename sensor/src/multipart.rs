@@ -80,7 +80,10 @@ pub fn stats(sample: &[u8], boundary: &str) -> MultipartStats {
 
         if let Some(p) = name_finder.find(head) {
             let v = &head[p + 6..];
-            let n = v.iter().position(|&b| b == b'"').unwrap_or(v.len().min(200));
+            let n = v
+                .iter()
+                .position(|&b| b == b'"')
+                .unwrap_or(v.len().min(200));
             let name = String::from_utf8_lossy(&v[..n.min(200)]).into_owned();
             st.max_name_depth = st
                 .max_name_depth
@@ -112,8 +115,14 @@ mod tests {
 
     #[test]
     fn parses_boundary() {
-        assert_eq!(boundary_of("multipart/form-data; boundary=abc"), Some("abc".into()));
-        assert_eq!(boundary_of("multipart/form-data; boundary=\"q q\"; x=1"), Some("q q".into()));
+        assert_eq!(
+            boundary_of("multipart/form-data; boundary=abc"),
+            Some("abc".into())
+        );
+        assert_eq!(
+            boundary_of("multipart/form-data; boundary=\"q q\"; x=1"),
+            Some("q q".into())
+        );
         assert_eq!(boundary_of("text/plain"), None);
     }
 

@@ -71,6 +71,9 @@ FIELDS: dict[str, FieldSpec] = {
     "hdr_fp": FieldSpec("str", None, None, "header-order fingerprint"),
     "host_known": FieldSpec("bool", None, None, "Host header is one of the node's own domains"),
     "self": FieldSpec("bool", None, None, "request from an operator address"),
+    "minted_return": FieldSpec("str", None, None,
+                               "where a value one of our answers handed out came back: "
+                               "body|query|path|header|cookie, empty if none did"),
 }
 HEADER_PREFIX = "header."
 RULE_BODY_BYTES = 1024 * 1024
@@ -350,6 +353,7 @@ def context(e, known_hosts=()) -> dict:
         "resp.tier": (e.resp or {}).get("tier", ""), "resp.kind": (e.resp or {}).get("kind", ""),
         "node": getattr(getattr(e, "node", None), "name", ""), "hdr_fp": e.hdr_fp,
         "host_known": bool(match_host(e.host, known_hosts)), "self": e.is_self,
+        "minted_return": e.minted_return,
         "sensor": e.host if match_host(e.host, known_hosts) else "",
     }
     for k, v in hdr.items():

@@ -62,6 +62,10 @@ pub struct RespInfo {
     pub bundle: String,
     pub tier: String,
     pub kind: String,
+    /// Values this answer handed out that its requester could not have known in advance, as
+    /// (where, key) pairs. If one of these keys turns up in a later request, that sender read us.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub minted: Vec<(String, String)>,
 }
 
 /// Structural flags. Deliberately named for what was observed, not for any campaign.

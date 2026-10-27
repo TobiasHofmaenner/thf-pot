@@ -87,14 +87,17 @@ impl Config {
             .filter_map(|s| s.parse().ok())
             .collect();
         let self_nets: Vec<IpNet> = match env("SELF_NETS") {
-            Some(v) => v
-                .split(',')
-                .filter_map(|s| s.trim().parse().ok())
-                .collect(),
-            None => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128"]
-                .iter()
-                .map(|s| s.parse().unwrap())
-                .collect(),
+            Some(v) => v.split(',').filter_map(|s| s.trim().parse().ok()).collect(),
+            None => [
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16",
+                "127.0.0.0/8",
+                "::1/128",
+            ]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect(),
         };
 
         Ok(Self {

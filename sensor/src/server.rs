@@ -2,10 +2,10 @@
 //! selected persona, and written to the store before the response goes out.
 
 use crate::{
-    bundle::Tier,
+    bundle::{Scope, Tier},
     capture::{self, BodyInfo, HttpInfo, Record, RespInfo},
     config::Config,
-    multipart,
+    mint, multipart,
     profiles::Profiles,
     status::Shared,
     store::Store,
@@ -19,7 +19,6 @@ use axum::{
 };
 use base64::Engine;
 use futures_util::StreamExt;
-use rand::RngCore;
 use rustls_acme::{caches::DirCache, AcmeConfig, EventOk};
 use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, sync::Arc, time::Instant};
@@ -34,11 +33,21 @@ struct AppState {
     scheme: &'static str,
 }
 
-pub async fn serve(cfg: Arc<Config>, profiles: Arc<Profiles>, store: Arc<Store>, status: Shared) -> anyhow::Result<()> {
+pub async fn serve(
+    cfg: Arc<Config>,
+    profiles: Arc<Profiles>,
+    store: Arc<Store>,
+    status: Shared,
+) -> anyhow::Result<()> {
     let make = |scheme: &'static str| {
         Router::new()
             .fallback(handle)
-            .with_state(AppState { cfg: cfg.clone(), profiles: profiles.clone(), store: store.clone(), scheme })
+            .with_state(AppState {
+                cfg: cfg.clone(),
+                profiles: profiles.clone(),
+                store: store.clone(),
+                scheme,
+            })
             .into_make_service_with_connect_info::<SocketAddr>()
     };
 
@@ -77,7 +86,8 @@ pub async fn serve(cfg: Arc<Config>, profiles: Arc<Profiles>, store: Arc<Store>,
                 Some(Err(e)) => {
                     warn!(error = %e, "acme");
                     let mut d = status.get().detail;
-                    d["error"] = serde_json::json!(e.to_string().chars().take(300).collect::<String>());
+                    d["error"] =
+                        serde_json::json!(e.to_string().chars().take(300).collect::<String>());
                     status.set("cert_error", d);
                 }
                 None => break,
@@ -86,7 +96,9 @@ pub async fn serve(cfg: Arc<Config>, profiles: Arc<Profiles>, store: Arc<Store>,
     });
 
     info!(%http_addr, %https_addr, staging = cfg.acme_staging, "listening");
-    let https = axum_server::bind(https_addr).acceptor(acceptor).serve(make("https"));
+    let https = axum_server::bind(https_addr)
+        .acceptor(acceptor)
+        .serve(make("https"));
     let http = axum_server::bind(http_addr).serve(make("http"));
     tokio::try_join!(https, http)?;
     Ok(())
@@ -142,8 +154,16 @@ async fn handle(
     // Source address. Only trust proxy headers when told to; this node normally terminates TLS itself.
     let mut src = peer.ip();
     if st.cfg.trust_proxy {
-        if let Some(p) = parts.headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
-            scheme = if p.eq_ignore_ascii_case("https") { "https" } else { "http" };
+        if let Some(p) = parts
+            .headers
+            .get("x-forwarded-proto")
+            .and_then(|v| v.to_str().ok())
+        {
+            scheme = if p.eq_ignore_ascii_case("https") {
+                "https"
+            } else {
+                "http"
+            };
         }
         let fwd = parts
             .headers
@@ -209,7 +229,32 @@ async fn handle(
 
     // Choose the persona and the answer.
     let profile = st.profiles.select(src, &host, &path);
-    let (status, kind, payload) = profile.bundle.route(profile.tier, &path, &query);
+    let (status, kind, page) = profile.bundle.route(profile.tier, &path, &query);
+
+    // Fill in whatever this answer hands out, and remember the keys. Nothing here looks at the
+    // request: the node mints and records, the hub does the thinking.
+    let mut minted: Vec<(String, String)> = Vec::new();
+    let payload = page.render(|slot| match slot.scope {
+        Scope::Node => match profile.bundle.node_value(&slot.name) {
+            Some((key, value)) => {
+                minted.push((slot.label(), key.clone()));
+                value.clone()
+            }
+            None => String::new(),
+        },
+        Scope::Request => {
+            let key = mint::key();
+            let value = mint::value(&slot.name, &key);
+            minted.push((slot.label(), key));
+            value
+        }
+    });
+    let cookie = profile.bundle.cookie.as_ref().map(|name| {
+        let key = mint::key();
+        let value = mint::value("cookie", &key);
+        minted.push(("cookie".to_string(), key));
+        format!("{name}={value}; path=/")
+    });
 
     let rec = Record {
         v: 1,
@@ -245,6 +290,7 @@ async fn handle(
             bundle: profile.bundle.name.clone(),
             tier: profile.tier.as_str().into(),
             kind: kind.as_str().into(),
+            minted,
         },
         dur_ms: t0.elapsed().as_millis() as u64,
     };
@@ -262,11 +308,8 @@ async fn handle(
             resp = resp.header("X-Powered-By", pb.as_str());
         }
     }
-    if let Some(cookie) = &profile.bundle.cookie {
-        let mut raw = [0u8; 13];
-        rand::thread_rng().fill_bytes(&mut raw);
-        let tok: String = raw.iter().map(|b| format!("{b:02x}")).collect();
-        resp = resp.header(header::SET_COOKIE, format!("{cookie}={tok}; path=/"));
+    if let Some(cookie) = &cookie {
+        resp = resp.header(header::SET_COOKIE, cookie.as_str());
     }
     resp.body(Body::from(payload)).unwrap_or_else(|_| {
         Response::builder()

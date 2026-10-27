@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 from apps.nodes.hosts import match_host
 from apps.nodes.models import Node
 
-from .models import Event
+from .models import Event, MintedToken
 
 router = Router(tags=["events"])
 
@@ -177,6 +177,13 @@ def detail(request, event_id: int):
         raise Http404 from err
     body = e.body_bytes
     # The modal shows at most 1 MiB as text; the raw bytes are a download away (/events/{id}/body).
+    # Did this request carry back a value one of our answers handed out, and which one?
+    returned = None
+    if e.minted_return_key:
+        t = MintedToken.objects.filter(key=e.minted_return_key).select_related("node").first()
+        if t:
+            returned = {"where": e.minted_return, "at": t.at, "node": t.node.name, "event": t.event_id,
+                        "issued": t.first_issued_at.isoformat(timespec="seconds").replace("+00:00", "Z")}
     seen = None
     if e.body_id:
         seen = {"events": Event.objects.filter(body_id=e.body_id).count(),
@@ -197,6 +204,7 @@ def detail(request, event_id: int):
         "body_stored": e.body_size, "body_present": bool(e.body_id), "body_shown": min(len(body), BODY_VIEW_BYTES),
         "body_sha256": e.body_sha256, "body_seen": seen,
         "body": body[:BODY_VIEW_BYTES].decode("latin-1"),
+        "minted_returned": returned,
         "multipart": e.multipart, "flags": e.flags, "resp": e.resp, "dur_ms": e.dur_ms,
         "labels": e.labels, "sev": e.sev,
     }

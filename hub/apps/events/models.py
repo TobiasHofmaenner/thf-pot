@@ -37,6 +37,26 @@ class Body(models.Model):
         return f"{self.sha256[:12]} ({self.size} B)"
 
 
+class MintedToken(models.Model):
+    """A value one of our answers handed out: a session identifier, a form token, a path shown in an
+    info page. The key is its first 16 hex characters, which is what a returning request is matched
+    on. Nothing recorded here is a secret of ours; the only thing that matters is that the requester
+    could not have known it in advance (see `apps/events/minted.py`)."""
+
+    key = models.CharField(max_length=16, primary_key=True)
+    node = models.ForeignKey("nodes.Node", on_delete=models.CASCADE, related_name="minted_tokens")
+    # The answer that handed it out, for a value minted per request. A node-scoped value belongs to
+    # the node rather than to one answer and is stored without an event, so it outlives retention.
+    event = models.ForeignKey("events.Event", null=True, blank=True, on_delete=models.CASCADE,
+                              related_name="minted_tokens")
+    at = models.CharField(max_length=40)  # "cookie", "req:form_token", "node:upload_tmp_dir"
+    first_issued_at = models.DateTimeField()
+    last_issued_at = models.DateTimeField(db_index=True)
+
+    def __str__(self):
+        return f"{self.key} ({self.at})"
+
+
 class Event(models.Model):
     node = models.ForeignKey("nodes.Node", on_delete=models.PROTECT, related_name="events")
     ulid = models.CharField(max_length=26)
@@ -84,6 +104,11 @@ class Event(models.Model):
     asn = models.IntegerField(null=True, blank=True)
     as_name = models.CharField(max_length=200, blank=True, default="")
     geo_at = models.DateTimeField(null=True, blank=True)
+
+    # Did this request carry back a value one of our answers handed out, and where: body, query,
+    # path, header or cookie. Empty means it did not, which is what a precomputed payload looks like.
+    minted_return = models.CharField(max_length=16, blank=True, default="", db_index=True)
+    minted_return_key = models.CharField(max_length=16, blank=True, default="")
 
     extra = models.JSONField(null=True, blank=True)
 

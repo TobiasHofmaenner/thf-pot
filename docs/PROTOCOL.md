@@ -54,10 +54,19 @@ A sensor whose heartbeat stops is itself a signal.
                  "max_headers_in_part": 2, "max_name_depth": 0, "file_parts": 1,
                  "empty_file_parts": 0, "session_upload_progress": true, "names_sample": [...] },
   "flags": ["multipart", "mp:upload_progress_field", "cookie:phpsessid"],
-  "resp": { "status": 200, "profile": "php-full", "bundle": "php", "tier": "full", "kind": "upload" },
+  "resp": { "status": 200, "profile": "php-full", "bundle": "php", "tier": "full", "kind": "upload",
+            "minted": [["req:form_token", "7fed0c71e218b132"], ["cookie", "8c883c18fa2c952b"]] },
   "dur_ms": 3
 }
 ```
+
+`resp.minted` lists the values this answer handed out that its requester could not have known in
+advance, as (where, key) pairs: a `cookie` session identifier, a `req:` slot filled per answer, a
+`node:` slot minted once per node. A key is the first 16 hex characters of the value, which is what
+the hub stores and matches; the hub lifts these out of `resp` into its own table. A request carrying
+one of those keys read one of our answers rather than firing something prepared beforehand. Nothing
+minted is a secret or actionable: an identifier for a session that does not exist, a token no form
+will check, a directory that is not on disk. See `sensor/src/mint.rs`.
 
 Flags are structural observations, never campaign names: `multipart`, `mp:upload_progress_field`,
 `mp:excessive_part_headers`, `mp:many_empty_file_parts`, `mp:deep_nesting`, `mp:huge_part_count`,

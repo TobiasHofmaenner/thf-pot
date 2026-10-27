@@ -136,6 +136,15 @@ class SeedRuleTests(TestCase):
         self.assertIn("host mismatch", self.labels(host="www.example.com")[0])
         self.assertNotIn("host mismatch", self.labels(host="s1.example.org")[0])
 
+    def test_read_our_answer(self):
+        labels, sev = self.labels(minted_return="body")
+        self.assertIn("read our answer", labels)
+        self.assertEqual(sev, 1)
+        self.assertIn("read our answer", self.labels(minted_return="path")[0])
+        # a cookie coming back may be nothing more than a client that keeps cookies
+        self.assertNotIn("read our answer", self.labels(minted_return="cookie")[0])
+        self.assertNotIn("read our answer", self.labels()[0])
+
     def test_crawler_vs_spoofed(self):
         ua = [["user-agent", "Mozilla/5.0 (compatible; Googlebot/2.1)"]]
         self.assertIn("crawler", self.labels(headers=ua)[0])
