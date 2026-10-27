@@ -18,13 +18,18 @@ def status_fragment(request):
 def storage_fragment(request):
     """htmx partial: how full the database is, what is kept and for how long."""
     u = storage.usage()
-    days = lambda d: f"{d} days" if d else "forever"  # noqa: E731
+    r = u["retention"]
     h = {
         "db": storage.human(u["db_bytes"]), "cap": storage.human(u["capacity_bytes"]),
+        "held": storage.human(u["held_bytes"]),
+        "high": storage.human(u["high_water_bytes"]), "low": storage.human(u["low_water_bytes"]),
+        "high_pct": round(r["high_water"] * 100), "low_pct": round(r["low_water"] * 100),
         "events_disk": storage.human(u["events"]["disk_bytes"]),
         "bodies_live": storage.human(u["bodies"]["bytes"]), "bodies_disk": storage.human(u["bodies"]["disk_bytes"]),
-        "budget": storage.human(u["bodies"]["budget_bytes"]),
-        "event_days": days(u["retention"]["event_days"]), "body_days": days(u["retention"]["body_days"]),
+        "time_rules": ", ".join(x for x in (
+            f"events older than {r['event_days']} days are deleted" if r["event_days"] else "",
+            f"bodies of events older than {r['body_days']} days are released" if r["body_days"] else "")
+            if x),
         "freed": storage.human((u["last_sweep"] or {}).get("bytes_freed", 0)),
     }
     return render(request, "core/_storage.html", {"u": u, "h": h})

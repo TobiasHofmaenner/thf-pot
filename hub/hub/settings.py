@@ -49,12 +49,17 @@ INSTALLED_APPS = [
 # body (MAX_READ_BYTES on the node, 64 MiB, ~86 MiB as base64) and then ships alone. The ingress
 # allows 96m to match (thf-infra, ingress-ingest.yaml).
 DATA_UPLOAD_MAX_MEMORY_SIZE = 96 * 1024 * 1024
-# Storage and retention (apps/events/retention.py). The database cannot see its own volume, so the
-# capacity is told to it; the default is the CNPG volume size in thf-infra. 0 days = rule off.
+# Storage and retention (apps/events/retention.py): by storage, oldest first. The database cannot see
+# its own volume, so the capacity is told to it; the default is the CNPG volume size in thf-infra.
 STORAGE_CAPACITY_BYTES = int(env("STORAGE_CAPACITY_BYTES", 20 * 1024**3))
-RETENTION_EVENT_DAYS = int(env("RETENTION_EVENT_DAYS", 365))  # events older than this are deleted
-RETENTION_BODY_DAYS = int(env("RETENTION_BODY_DAYS", 90))  # bodies of older events are released (hash + size stay)
-RETENTION_BODY_BUDGET = float(env("RETENTION_BODY_BUDGET", 0.5))  # share of capacity bodies may fill before the oldest go
+RETENTION_HIGH_WATER = float(env("RETENTION_HIGH_WATER", 0.80))  # above this share of the volume the oldest requests go
+RETENTION_LOW_WATER = float(env("RETENTION_LOW_WATER", 0.70))  # ... until the hub holds this much
+# What one request is counted as on disk without its body, including indexes. Measured 1.6-2.2 KiB
+# per row on real data; counted generously so the file settles under the mark, not over it.
+EVENT_ROW_BYTES = int(env("EVENT_ROW_BYTES", 2560))
+# Optional time rules on top, off by default (0).
+RETENTION_EVENT_DAYS = int(env("RETENTION_EVENT_DAYS", 0))  # events older than this are deleted
+RETENTION_BODY_DAYS = int(env("RETENTION_BODY_DAYS", 0))  # bodies of older events are released (hash + size stay)
 # What the node page tells a new node to run and where to report.
 SENSOR_IMAGE = env("SENSOR_IMAGE", "ghcr.io/tobiashofmaenner/thf-pot-node:main")
 HUB_PUBLIC_URL = env("HUB_PUBLIC_URL")  # default: derived from the request

@@ -39,13 +39,15 @@ open http://127.0.0.1:8000
 | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CACHE_LOCATION` | Redis URLs |
 | `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE` | `1` behind the ingress |
 | `APP_VERSION` | baked in at build; shown on the page |
-| `STORAGE_CAPACITY_BYTES` | size of the Postgres volume (default 20 GiB); the gauge and the body budget are measured against it |
-| `RETENTION_EVENT_DAYS` | events older than this are deleted (default 365; 0 = never) |
-| `RETENTION_BODY_DAYS` | bodies of older events are released, the event keeps hash and size (default 90; 0 = never) |
-| `RETENTION_BODY_BUDGET` | share of the capacity bodies may fill before the oldest are released (default 0.5) |
+| `STORAGE_CAPACITY_BYTES` | size of the Postgres volume (default 20 GiB); the gauge and the marks are measured against it |
+| `RETENTION_HIGH_WATER`, `RETENTION_LOW_WATER` | retention by storage: above the high mark (default 0.80 of the volume) the oldest requests are deleted until the low mark (0.70) is held |
+| `EVENT_ROW_BYTES` | what one request is counted as on disk without its body, indexes included (default 2560; measured 1.6–2.2 KiB on real data) |
+| `RETENTION_EVENT_DAYS`, `RETENTION_BODY_DAYS` | optional time rules, off by default (0): delete events older than X days; release bodies of events older than Y days, the event keeps hash and size |
 
 Request bodies are stored once per sha256 (`events.Body`); events point at the row, so a payload
 posted twenty times or seen again next month costs one copy and the detail view says how often it
-was seen. The retention sweep runs hourly in the worker (`apps/events/retention.py`).
+was seen. Retention is by storage, oldest first, hourly in the worker (`apps/events/retention.py`).
+Postgres reuses freed pages rather than shrinking the file, so the hub counts what it holds itself
+(bodies exactly, requests at `EVENT_ROW_BYTES`) and the on-disk figure settles at the high mark.
 
 Cluster manifests: `thf-infra/clusters/thf-k8s-01/kubernetes/apps/internal/thf-pot/`.

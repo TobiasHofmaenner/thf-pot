@@ -164,38 +164,47 @@ class StorageTests(TestCase):
         cache.delete(storage.LAST_SWEEP_KEY)
         self.s = mk_node()
 
-    @override_settings(STORAGE_CAPACITY_BYTES=1000, RETENTION_BODY_BUDGET=0.5, RETENTION_EVENT_DAYS=365, RETENTION_BODY_DAYS=90)
+    @override_settings(STORAGE_CAPACITY_BYTES=10000, RETENTION_HIGH_WATER=0.8, RETENTION_LOW_WATER=0.7, EVENT_ROW_BYTES=1000,
+                       RETENTION_EVENT_DAYS=0, RETENTION_BODY_DAYS=0)
     def test_usage_endpoint_fragment_and_gauge(self):
         mk_event(self.s, body_sample=b"x" * 100)
         mk_event(self.s, body_sample=b"x" * 100)
         mk_event(self.s, body_sample=None)
         u = storage.usage(fresh=True)
         self.assertEqual((u["events"]["count"], u["bodies"]["count"], u["bodies"]["bytes"], u["bodies"]["refs"]), (3, 1, 100, 2))
-        self.assertEqual(u["bodies"]["budget_bytes"], 500)
-        self.assertGreater(u["db_bytes"], 1000)
-        self.assertEqual(u["level"], "critical")  # a database is far bigger than a 1000-byte volume
-        self.assertEqual(u["retention"], {"event_days": 365, "body_days": 90, "body_budget": 0.5})
+        self.assertEqual((u["held_bytes"], u["held_pct"], u["high_water_bytes"], u["low_water_bytes"]), (3100, 31.0, 8000, 7000))
+        self.assertGreater(u["db_bytes"], 10000)
+        self.assertEqual(u["level"], "critical")  # a database is far bigger than a 10 kB volume
+        self.assertEqual(u["retention"], {"high_water": 0.8, "low_water": 0.7, "event_row_bytes": 1000, "event_days": 0, "body_days": 0})
         self.assertIsNone(u["last_sweep"])
         self.assertEqual(self.client.get("/api/v1/storage").json()["events"]["count"], 3)
         r = self.client.get("/_storage")
         self.assertContains(r, "3 rows")
+        self.assertContains(r, "above 7.8 KiB (80 %)")
         self.assertContains(r, "not yet run")
-        self.assertContains(self.client.get("/"), 'id="stbar"')
+        self.assertNotContains(r, "Also:")
+        self.assertContains(self.client.get("/"), 'id="stmark"')
         self.assertEqual(storage.human(3145754), "3.0 MiB")
+
+    @override_settings(RETENTION_EVENT_DAYS=365, RETENTION_BODY_DAYS=90)
+    def test_fragment_names_optional_time_rules(self):
+        r = self.client.get("/_storage")
+        self.assertContains(r, "Also: events older than 365 days are deleted, bodies of events older than 90 days are released.")
 
 
 class RetentionTests(TestCase):
     def setUp(self):
         cache.delete(storage.CACHE_KEY)
         cache.delete(storage.LAST_SWEEP_KEY)
+        cache.delete(retention.LAST_DB_KEY)
         self.s = mk_node()
         self.now = timezone.now()
 
     def ev(self, days_ago, body=None):
         return mk_event(self.s, ts=self.now - timedelta(days=days_ago), body_sample=body)
 
-    @override_settings(RETENTION_EVENT_DAYS=30, RETENTION_BODY_DAYS=7, STORAGE_CAPACITY_BYTES=10**9, RETENTION_BODY_BUDGET=0.5)
-    def test_time_rules_delete_release_and_drop_orphans(self):
+    @override_settings(RETENTION_EVENT_DAYS=30, RETENTION_BODY_DAYS=7, STORAGE_CAPACITY_BYTES=10**9)
+    def test_optional_time_rules_delete_release_and_drop_orphans(self):
         ancient = self.ev(40, b"old payload")  # the event goes
         old = self.ev(10, b"old payload")  # released; its body row is then unreferenced and dropped
         shared_old = self.ev(10, b"shared")  # released, but the row stays: a fresh event still points at it
@@ -217,18 +226,37 @@ class RetentionTests(TestCase):
         again = retention.sweep()  # idempotent
         self.assertEqual((again["events_deleted"], again["bodies_released"], again["bodies_deleted"]), (0, 0, 0))
 
-    @override_settings(RETENTION_EVENT_DAYS=0, RETENTION_BODY_DAYS=0, STORAGE_CAPACITY_BYTES=1000, RETENTION_BODY_BUDGET=0.5)
-    def test_budget_pressure_releases_the_oldest_bodies_first(self):
-        oldest, middle, newest = self.ev(5, b"a" * 300), self.ev(3, b"b" * 300), self.ev(1, b"c" * 300)
-        # live 900 B against a 500 B budget: free down to 450, oldest first, one event at a time here
-        with mock.patch.object(retention, "PRESSURE_CHUNK", 1):
+    @override_settings(RETENTION_EVENT_DAYS=0, RETENTION_BODY_DAYS=0, STORAGE_CAPACITY_BYTES=10000,
+                       RETENTION_HIGH_WATER=0.5, RETENTION_LOW_WATER=0.3, EVENT_ROW_BYTES=1000)
+    def test_above_the_mark_the_oldest_requests_go_until_the_low_mark(self):
+        evs = [self.ev(6, b"a" * 300), self.ev(5, b"b" * 300), self.ev(4, b"shared"), self.ev(3), self.ev(2, b"shared"), self.ev(1)]
+        # held 6 × 1000 + 606 = 6606 > 5000: free down to 3000, i.e. 3606, oldest first, one request per step here.
+        # The two oldest free 1300 each; the third frees 1000 only, its body lives on in a newer request.
+        with mock.patch.object(retention, "EVICT_CHUNK", 1), mock.patch.object(storage, "db_size", return_value=5000):
             out = retention.sweep()
-        self.assertTrue(out["pressure"])
-        self.assertEqual((out["events_deleted"], out["bodies_released"], out["bodies_deleted"], out["bytes_freed"]), (0, 2, 2, 600))
-        for e, has_body in ((oldest, False), (middle, False), (newest, True)):
-            e.refresh_from_db()
-            self.assertEqual(bool(e.body_id), has_body, e.body_sha256)
-        self.assertFalse(retention.sweep()["pressure"])  # 300 B live now, under budget
+        self.assertEqual((out["pressure"], out["valve"], out["held_before"], out["need"]), (True, False, 6606, 3606))
+        self.assertEqual((out["events_deleted"], out["bodies_deleted"], out["bytes_freed"]), (4, 2, 4600))
+        self.assertEqual(sorted(Event.objects.values_list("id", flat=True)), [evs[4].id, evs[5].id])
+        self.assertEqual(Body.objects.get().size, 6)  # "shared" survives through the newer request
+        self.assertEqual(cache.get(storage.LAST_SWEEP_KEY)["events_deleted"], 4)
+        with mock.patch.object(storage, "db_size", return_value=5000):
+            again = retention.sweep()  # 2006 held: under the high mark, nothing happens
+        self.assertEqual((again["pressure"], again["events_deleted"]), (False, 0))
+
+    @override_settings(RETENTION_EVENT_DAYS=0, RETENTION_BODY_DAYS=0, STORAGE_CAPACITY_BYTES=10000,
+                       RETENTION_HIGH_WATER=0.8, RETENTION_LOW_WATER=0.7, EVENT_ROW_BYTES=1000)
+    def test_valve_evicts_the_growth_when_the_file_still_grows_near_full(self):
+        for d in range(5, 0, -1):
+            self.ev(d)
+        # held 5000, well under the 8000 mark; but the file itself is at 9200 and grew by 500 since last sweep
+        with mock.patch.object(storage, "db_size", side_effect=[8700, 9200, 9200]), mock.patch.object(retention, "EVICT_CHUNK", 1):
+            first = retention.sweep()  # records 8700, nothing to do
+            second = retention.sweep()  # 9200 > 8700 and over 90 %: evict 2 × 500 = 2 requests
+            third = retention.sweep()  # not growing any more
+        self.assertEqual((first["pressure"], first["valve"]), (False, False))
+        self.assertEqual((second["valve"], second["need"], second["events_deleted"]), (True, 1000, 1))
+        self.assertEqual((third["valve"], third["events_deleted"]), (False, 0))
+        self.assertEqual(Event.objects.count(), 4)
 
 
 class HeartbeatGeoTests(TestCase):
