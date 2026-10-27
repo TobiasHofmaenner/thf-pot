@@ -1,10 +1,40 @@
 """One row per request a node saw. Columns map 1:1 onto node schema v1 (docs/PROTOCOL.md);
 anything the hub does not know yet lands in `extra`. Rows are evidence: the ingest path only
-inserts, and the only columns ever updated later are the analysis ones (labels, severity)."""
+inserts, and the only columns ever updated later are the analysis ones (labels, severity) and the
+body pointer, which retention releases."""
+
+import hashlib
 
 from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.db import models
+
+
+class Body(models.Model):
+    """One copy of each distinct request body, keyed by its sha256 (computed on the hub over the
+    bytes it stores, never trusted from the node). Events point at it, so a scanner posting the same
+    exploit twenty times costs one copy, and "seen before" is a column, not a scan. Retention
+    releases the bytes; the event keeps the hash and size as evidence of what was there."""
+
+    sha256 = models.CharField(max_length=64, primary_key=True)
+    data = models.BinaryField()
+    size = models.BigIntegerField()
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField(db_index=True)
+
+    @classmethod
+    def store(cls, data: bytes, seen_at) -> "Body":
+        """Get-or-create for a single body (tests, imports); the ingest path does this in bulk."""
+        h = hashlib.sha256(data).hexdigest()
+        b, created = cls.objects.get_or_create(
+            sha256=h, defaults={"data": data, "size": len(data), "first_seen_at": seen_at, "last_seen_at": seen_at}
+        )
+        if not created and seen_at > b.last_seen_at:
+            cls.objects.filter(pk=h).update(last_seen_at=seen_at)
+        return b
+
+    def __str__(self):
+        return f"{self.sha256[:12]} ({self.size} B)"
 
 
 class Event(models.Model):
@@ -31,8 +61,10 @@ class Event(models.Model):
     declared_len = models.BigIntegerField(null=True, blank=True)
     read_len = models.BigIntegerField(default=0)
     truncated = models.BooleanField(default=False)
+    # sha256 and size of what the node stored; both stay after retention released the bytes.
     body_sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True)
-    body_sample = models.BinaryField(null=True, blank=True)
+    body_size = models.BigIntegerField(default=0)
+    body = models.ForeignKey(Body, null=True, blank=True, on_delete=models.SET_NULL, related_name="events")
     multipart = models.JSONField(null=True, blank=True)
 
     flags = ArrayField(models.CharField(max_length=64), default=list, blank=True)
@@ -64,6 +96,11 @@ class Event(models.Model):
         if self.severity is not None:
             return "malicious" if self.severity >= 2 else "suspicious" if self.severity == 1 else "benign"
         return "suspicious" if any(f in self.SUSPICIOUS_FLAGS for f in self.flags) else "benign"
+
+    @property
+    def body_bytes(self) -> bytes:
+        """The stored body; empty when there was none or retention released it. Use select_related("body")."""
+        return bytes(self.body.data) if self.body_id else b""
 
     class Meta:
         constraints = [

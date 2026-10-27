@@ -49,6 +49,12 @@ INSTALLED_APPS = [
 # body (MAX_READ_BYTES on the node, 64 MiB, ~86 MiB as base64) and then ships alone. The ingress
 # allows 96m to match (thf-infra, ingress-ingest.yaml).
 DATA_UPLOAD_MAX_MEMORY_SIZE = 96 * 1024 * 1024
+# Storage and retention (apps/events/retention.py). The database cannot see its own volume, so the
+# capacity is told to it; the default is the CNPG volume size in thf-infra. 0 days = rule off.
+STORAGE_CAPACITY_BYTES = int(env("STORAGE_CAPACITY_BYTES", 20 * 1024**3))
+RETENTION_EVENT_DAYS = int(env("RETENTION_EVENT_DAYS", 365))  # events older than this are deleted
+RETENTION_BODY_DAYS = int(env("RETENTION_BODY_DAYS", 90))  # bodies of older events are released (hash + size stay)
+RETENTION_BODY_BUDGET = float(env("RETENTION_BODY_BUDGET", 0.5))  # share of capacity bodies may fill before the oldest go
 # What the node page tells a new node to run and where to report.
 SENSOR_IMAGE = env("SENSOR_IMAGE", "ghcr.io/tobiashofmaenner/thf-pot-node:main")
 HUB_PUBLIC_URL = env("HUB_PUBLIC_URL")  # default: derived from the request
@@ -116,6 +122,7 @@ CELERY_BEAT_SCHEDULE = {
     "heartbeat": {"task": "apps.core.tasks.heartbeat", "schedule": 60.0},
     "geo-sweep": {"task": "apps.events.tasks.enrich_pending", "schedule": 60.0},
     "classify-sweep": {"task": "apps.rules.tasks.classify_pending", "schedule": 60.0},
+    "retention-sweep": {"task": "apps.events.tasks.retention_sweep", "schedule": 3600.0},
 }
 
 # DB-IP Lite databases baked into the image (see Dockerfile); absent = no geo, never an error.

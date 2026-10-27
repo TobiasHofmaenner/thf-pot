@@ -1,10 +1,12 @@
+import base64
 import gzip
+import hashlib
 import json
 
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.events.models import Event
+from apps.events.models import Body, Event
 
 from .models import Node
 from .views import parse_domains
@@ -49,7 +51,8 @@ class IngestTests(TestCase):
         self.assertEqual(r.json(), {"accepted": 2, "duplicates": 1, "rejected": 0})
         self.assertEqual(Event.objects.count(), 2)
         e = Event.objects.get(ulid=a)
-        self.assertEqual(bytes(e.body_sample), b"abc")
+        self.assertEqual(e.body_bytes, b"abc")
+        self.assertEqual((e.body_size, e.body_sha256), (3, hashlib.sha256(b"abc").hexdigest()))  # our hash, not the node's claim
         self.assertEqual(e.content_type, "multipart/form-data; boundary=x")
         self.assertEqual(e.flags, ["multipart", "mp:upload_progress_field"])
         self.assertEqual(str(e.src), "203.0.113.9")
@@ -70,14 +73,27 @@ class IngestTests(TestCase):
         self.assertEqual(r.json(), {"accepted": 1, "duplicates": 0, "rejected": 2})
 
     def test_a_full_size_body_is_stored_whole(self):
-        import base64
-
         raw = bytes(range(256)) * (8 * 1024) + b"END"  # 2 MiB: above the hub's former 1 MiB cap
         body = {"declared_len": len(raw), "read_len": len(raw), "truncated": False, "sha256": "ab" * 32,
                 "sample_b64": base64.b64encode(raw).decode()}
         r = self.post(ndjson_gz([record("01JAX00000000000000000000A", body=body)]))
         self.assertEqual(r.status_code, 202, r.content)
-        self.assertEqual(bytes(Event.objects.get().body_sample), raw)
+        self.assertEqual(Event.objects.get().body_bytes, raw)
+
+    def test_identical_bodies_are_stored_once(self):
+        a, b, c = "01JAX00000000000000000000B", "01JAX00000000000000000000C", "01JAX00000000000000000000D"
+        r = self.post(ndjson_gz([record(a), record(b, ts="2026-10-23T13:00:00Z")]))
+        self.assertEqual(r.status_code, 202, r.content)
+        body = Body.objects.get()
+        self.assertEqual((body.size, bytes(body.data), body.first_seen_at.hour, body.last_seen_at.hour), (3, b"abc", 12, 13))
+        self.assertEqual(Event.objects.filter(body=body).count(), 2)
+        # seen again in a later batch: still one row, last_seen moves on
+        self.post(ndjson_gz([record(c, ts="2026-10-24T09:00:00Z")]))
+        body.refresh_from_db()
+        self.assertEqual((Body.objects.count(), body.last_seen_at.day, Event.objects.filter(body=body).count()), (1, 24, 3))
+        other = dict(record(a)["body"], sample_b64=base64.b64encode(b"xyz").decode())
+        self.post(ndjson_gz([record("01JAX00000000000000000000E", body=other)]))
+        self.assertEqual(Body.objects.count(), 2)
 
     def test_unknown_keys_land_in_extra(self):
         r = self.post(ndjson_gz([record("01JAX000000000000000000005", future_field={"x": 1})]))

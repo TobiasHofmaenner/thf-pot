@@ -3,7 +3,7 @@ import json
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.events.models import Event
+from apps.events.models import Body, Event
 from apps.nodes.models import Node
 
 from . import engine, export, sigma
@@ -27,6 +27,10 @@ def mk_event(node, **over):
     kw.update(over)
     if "target" not in over and ("path" in over or "query" in over):
         kw["target"] = kw["path"] + ("?" + kw["query"] if kw["query"] else "")
+    sample = kw.pop("body_sample", None)
+    if sample:
+        b = Body.store(sample, kw["ts"])
+        kw.update(body=b, body_size=len(sample), body_sha256=b.sha256)
     return Event.objects.create(**kw)
 
 
@@ -162,7 +166,8 @@ class SeedRuleTests(TestCase):
         self.assertIn("PHPUnit eval-stdin", e.labels)
         row = engine.for_rules(Event.objects.filter(pk=e.pk)).get()
         self.assertEqual(len(bytes(row.body_head)), sigma.RULE_BODY_BYTES)
-        self.assertIn("body_sample", row.get_deferred_fields())
+        self.assertEqual(bytes(row.body_head)[:6], b"<?php ")
+        self.assertIsNone(engine.for_rules(Event.objects.filter(pk=mk_event(self.s).pk)).get().body_head)  # no body: no join row
         self.assertEqual(engine.test_rule("a:\n  body|contains: '<?php'\ncondition: a", n=5)["matched"], 1)
         self.assertEqual(engine.test_rule("a:\n  body|contains: ZZTAIL\ncondition: a", n=5)["matched"], 0)
 

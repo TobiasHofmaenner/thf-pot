@@ -39,6 +39,14 @@ def enrich_events(ids: list[int]):
 
 
 @shared_task(ignore_result=True)
+def retention_sweep():
+    """Hourly: apply the retention rules (apps.events.retention)."""
+    from . import retention
+
+    return retention.sweep()
+
+
+@shared_task(ignore_result=True)
 def enrich_pending():
     """Sweep for anything the per-batch task missed (worker was down, task lost)."""
     ids = list(Event.objects.filter(geo_at__isnull=True).order_by("id").values_list("id", flat=True)[:2000])

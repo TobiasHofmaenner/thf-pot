@@ -1,6 +1,8 @@
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 
+from apps.events import storage
+
 from . import status
 
 
@@ -11,6 +13,21 @@ def index(request):
 def status_fragment(request):
     """htmx partial: the index page swaps this in on load and every few seconds."""
     return render(request, "core/_status.html", {"s": status.collect()})
+
+
+def storage_fragment(request):
+    """htmx partial: how full the database is, what is kept and for how long."""
+    u = storage.usage()
+    days = lambda d: f"{d} days" if d else "forever"  # noqa: E731
+    h = {
+        "db": storage.human(u["db_bytes"]), "cap": storage.human(u["capacity_bytes"]),
+        "events_disk": storage.human(u["events"]["disk_bytes"]),
+        "bodies_live": storage.human(u["bodies"]["bytes"]), "bodies_disk": storage.human(u["bodies"]["disk_bytes"]),
+        "budget": storage.human(u["bodies"]["budget_bytes"]),
+        "event_days": days(u["retention"]["event_days"]), "body_days": days(u["retention"]["body_days"]),
+        "freed": storage.human((u["last_sweep"] or {}).get("bytes_freed", 0)),
+    }
+    return render(request, "core/_storage.html", {"u": u, "h": h})
 
 
 def healthz(request):

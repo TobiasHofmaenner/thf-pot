@@ -2,6 +2,7 @@
 cap lengths, and never let one bad line reject a batch."""
 
 import base64
+import hashlib
 import ipaddress
 import logging
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone as dj_tz
 
-from apps.events.models import Event
+from apps.events.models import Body, Event
 
 from .models import Node
 
@@ -54,24 +55,24 @@ def to_event(node: Node, rec: dict) -> Event:
         src = str(ipaddress.ip_address(rec.get("src", "")))
     except ValueError as e:
         raise BadRecord("src") from e
-    http = rec.get("http") or {}
-    body = rec.get("body") or {}
+    http = rec.get("http") if isinstance(rec.get("http"), dict) else {}
+    body = rec.get("body") if isinstance(rec.get("body"), dict) else {}
     headers = http.get("headers") if isinstance(http.get("headers"), list) else []
     headers = [[_s(k, 200), _s(v, 2000)] for k, v in (h for h in headers if isinstance(h, list) and len(h) == 2)][:200]
     ctype = next((v for k, v in headers if k == "content-type"), "")
 
     sample = None
-    b64 = body.pop("sample_b64", None) if isinstance(body, dict) else None  # drop the base64 once decoded
+    b64 = body.pop("sample_b64", None)  # drop the base64 once decoded
     if isinstance(b64, str) and b64:
         try:
-            sample = base64.b64decode(b64, validate=True)[:MAX_SAMPLE]
+            sample = base64.b64decode(b64, validate=True)[:MAX_SAMPLE] or None
         except ValueError:
             sample = None
 
     flags = [_s(f, 64) for f in (rec.get("flags") or []) if isinstance(f, str)][:64]
     extra = {k: v for k, v in rec.items() if k not in KNOWN_KEYS} or None
 
-    return Event(
+    e = Event(
         node=node,
         ulid=ulid,
         ts=_ts(rec.get("ts")),
@@ -91,14 +92,42 @@ def to_event(node: Node, rec: dict) -> Event:
         declared_len=_int(body.get("declared_len")),
         read_len=_int(body.get("read_len"), 0),
         truncated=bool(body.get("truncated", False)),
-        body_sha256=_s(body.get("sha256"), 64),
-        body_sample=sample,
+        # the hash is ours, over the bytes we keep; the node's claim is only used when nothing was stored
+        body_sha256=hashlib.sha256(sample).hexdigest() if sample else _s(body.get("sha256"), 64),
+        body_size=len(sample) if sample else 0,
         multipart=rec.get("multipart") if isinstance(rec.get("multipart"), dict) else None,
         flags=flags,
         resp=rec.get("resp") if isinstance(rec.get("resp"), dict) else {},
         dur_ms=_int(rec.get("dur_ms"), 0),
         extra=extra,
     )
+    e._sample = sample  # attached to a Body row by ingest_batch, once per distinct hash
+    return e
+
+
+def _attach_bodies(events: list) -> None:
+    """One Body row per distinct sha256 in the batch; the events point at it. A payload posted
+    twenty times, or seen again next week, costs one copy."""
+    samples, first, last = {}, {}, {}
+    for e in events:
+        s = getattr(e, "_sample", None)
+        if s:
+            h = e.body_sha256
+            samples.setdefault(h, s)
+            first[h] = min(first.get(h, e.ts), e.ts)
+            last[h] = max(last.get(h, e.ts), e.ts)
+            e.body_id = h
+    if not samples:
+        return
+    existing = set(Body.objects.filter(sha256__in=list(samples)).values_list("sha256", flat=True))
+    Body.objects.bulk_create(
+        [Body(sha256=h, data=s, size=len(s), first_seen_at=first[h], last_seen_at=last[h])
+         for h, s in samples.items() if h not in existing],
+        ignore_conflicts=True,
+    )
+    for h in existing:  # a batch may arrive late (node outage, import): both ends of "seen" can move
+        Body.objects.filter(sha256=h, last_seen_at__lt=last[h]).update(last_seen_at=last[h])
+        Body.objects.filter(sha256=h, first_seen_at__gt=first[h]).update(first_seen_at=first[h])
 
 
 def _enqueue_geo(node_pk: int, ulids: list[str]):
@@ -138,6 +167,7 @@ def ingest_batch(node: Node, records: list) -> dict:
             new = [e for e in unique if e.ulid not in existing]
             duplicates += len(unique) - len(new)
             if new:
+                _attach_bodies(new)
                 # ignore_conflicts covers a retried batch racing its own first delivery.
                 Event.objects.bulk_create(new, ignore_conflicts=True, batch_size=200)
                 accepted = len(new)

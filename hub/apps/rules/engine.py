@@ -60,9 +60,9 @@ def classify_one(event: Event, rules: list[Compiled], known_hosts=()) -> tuple[l
 def for_rules(qs):
     """Rows as the rules need them: the node, and only the first RULE_BODY_BYTES of the body, cut in
     the database, so classifying never pulls a full-size body into the worker."""
-    head = Func(F("body_sample"), function="substring",
+    head = Func(F("body__data"), function="substring",
                 template=f"%(function)s(%(expressions)s from 1 for {sigma.RULE_BODY_BYTES})", output_field=BinaryField())
-    return qs.select_related("node").defer("body_sample").annotate(body_head=head)
+    return qs.select_related("node").annotate(body_head=head)
 
 
 def classify_events(ids, rules=None) -> int:

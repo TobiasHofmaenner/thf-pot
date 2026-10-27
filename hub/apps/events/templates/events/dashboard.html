@@ -8,6 +8,7 @@ header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;padding:12px
 h1{font-size:16px;margin:0;font-weight:600}.stat{color:var(--muted)}.stat b{color:var(--ink);font-weight:600}
 nav a{color:var(--muted);text-decoration:none;margin-right:14px}nav a:hover{color:var(--accent)}
 .live{display:inline-flex;align-items:center;gap:6px}.dot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 6px #4ade80}.dot.off{background:#6b7280;box-shadow:none}
+.store{text-decoration:none;display:inline-flex;align-items:center;gap:6px}.store:hover{color:var(--accent)}.bar{display:inline-block;width:80px;height:8px;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#000}.bar i{display:block;height:100%;width:0;background:#4ade80;transition:width .4s}.bar.warn i{background:#fbbf24}.bar.crit i{background:#ff3b3b}
 .controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
 .controls label{color:var(--muted)}select,button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit}button:hover{border-color:var(--accent)}
 input[type=range]{flex:1;min-width:200px;accent-color:var(--accent)}#range{min-width:300px;font-variant-numeric:tabular-nums}
@@ -61,7 +62,8 @@ footer{padding:14px 16px 28px;color:var(--muted);font-size:12px;line-height:1.6;
 </style></head><body>
 <header><h1>thf-pot</h1><nav><a href="{% url 'nodes' %}">nodes</a><a href="{% url 'status' %}">status</a><a href="/api/v1/docs">api</a></nav>
 <span class="stat">total <b id="total">0</b> requests</span><span class="stat">window <b id="wn">0</b> requests, <b id="wf">0</b> flagged</span>
-<span class="stat live"><span class="dot off" id="dot"></span><span id="livetxt">connecting</span></span><span class="stat" id="updated"></span></header>
+<span class="stat live"><span class="dot off" id="dot"></span><span id="livetxt">connecting</span></span><span class="stat" id="updated"></span>
+<a class="stat store" id="store" href="{% url 'status' %}" title="storage: measuring">storage <span class="bar"><i id="stbar"></i></span> <b id="stpct">…</b></a></header>
 <div class="controls">
 <label>window <select id="len"><option value="1">1 h</option><option value="6">6 h</option><option value="24" selected>24 h</option><option value="72">3 d</option><option value="168">7 d</option><option value="720">30 d</option></select></label>
 <label>node <select id="target"><option value="">all</option></select></label><label><input type="checkbox" id="fxon" checked> attack arcs</label>
@@ -265,6 +267,12 @@ const chart=new Chart($('chart'),{type:'bar',data:{labels:[],datasets:[{label:'r
 function applySummary(s){S=s;chart.data.labels=s.hours;chart.data.datasets[0].data=s.hours.map(h=>s.by_hour[h].n);chart.data.datasets[1].data=s.hours.map(h=>s.by_hour[h].flagged);
  $('updated').textContent='updated '+s.generated.slice(11,19)+' UTC';render();}
 async function refresh(){try{const d=await (await fetch(API+'/summary?hours='+(+$('len').value)+'&labels='+encodeURIComponent([...FLAGS].join(',')),{cache:'no-store'})).json();applySummary(d);fpRender()}catch(e){console.warn(e)}}
+/* storage gauge in the header: database size against the volume, with the retention policy in the tooltip */
+const human=b=>{const u=['B','KiB','MiB','GiB','TiB'];let i=0;b=+b||0;while(b>=1024&&i<u.length-1){b/=1024;i++}return (i?b.toFixed(1):b)+' '+u[i]};
+async function storage(){try{const d=await (await fetch('/api/v1/storage',{cache:'no-store'})).json();const bar=$('stbar').parentElement;bar.className='bar'+(d.level==='critical'?' crit':d.level==='warn'?' warn':'');
+ $('stbar').style.width=Math.min(100,d.pct||0)+'%';$('stpct').textContent=d.pct==null?'?':d.pct+'%';const ds=d.retention,ls=d.last_sweep;
+ $('store').title=`${human(d.db_bytes)} of ${human(d.capacity_bytes)} used\n${d.events.count} events · ${d.bodies.count} distinct bodies (${human(d.bodies.bytes)}) pointed at by ${d.bodies.refs} events\nretention: events ${ds.event_days?ds.event_days+' d':'forever'}, bodies ${ds.body_days?ds.body_days+' d':'forever'}, body budget ${human(d.bodies.budget_bytes)}`+
+  (ls?`\nlast sweep ${ls.at.slice(0,16).replace('T',' ')} UTC: ${ls.events_deleted} events deleted, ${ls.bodies_released} bodies released, ${human(ls.bytes_freed)} freed`:'\nno sweep yet (hourly)')}catch(e){console.warn(e)}}
 $('len').onchange=refresh;$('target').onchange=()=>{refill()};
 // live events
 const evs=$('events');
@@ -328,9 +336,10 @@ function renderEvent(){const r=dcur;if(!r)return;$('dtitle').textContent=`${r.me
  const F=document.createDocumentFragment();
  const labs=el('span');if(r.labels&&r.labels.length)for(const l of r.labels)labs.append(chip(l,r.sev,''));else labs.textContent='unclassified';
  const flags=el('span');for(const f of (r.flags||[]))flags.append(chip(f,'',''));
- const bodyline=`${r.body_bytes_read} B read, ${r.declared_length==null?'no Content-Length':'Content-Length '+r.declared_length}${r.truncated?', client offered more than the node reads':''}${r.body_stored<r.body_bytes_read?`, only the first ${r.body_stored} B are stored`:''}${r.body_shown<r.body_stored?`, first ${r.body_shown} B shown here`:''}`;
+ const bodyline=`${r.body_bytes_read} B read, ${r.declared_length==null?'no Content-Length':'Content-Length '+r.declared_length}${r.truncated?', client offered more than the node reads':''}${r.body_stored<r.body_bytes_read?`, only the first ${r.body_stored} B were stored`:''}${r.body_stored&&!r.body_present?`, released by retention (${r.body_stored} B, hash kept)`:r.body_shown<r.body_stored?`, first ${r.body_shown} B shown here`:''}`;
  const dl=el('a',null,`download body (${r.body_stored} B)`);dl.href=API+'/'+r.id+'/body';dl.style.color='var(--accent)';
- F.append(kv([['labels',labs],['node flags',(r.flags||[]).length?flags:null],['requested host',r.host],['answered with',r.resp?`${r.resp.status} ${r.resp.kind} (${r.resp.bundle}/${r.resp.tier}, profile ${r.resp.profile})`:null],['header order',r.hdr_fp],['scheme',r.scheme?`${r.scheme} ${r.http||''}`:null],['body',bodyline],['body file',r.body_stored?dl:null],['body sha256',r.body_sha256],['received by hub',r.received_at]]));
+ const seen=r.body_seen&&r.body_seen.events>1?`${r.body_seen.events} requests carried this exact body, ${r.body_seen.first.slice(0,16).replace('T',' ')} → ${r.body_seen.last.slice(0,16).replace('T',' ')} UTC`:null;
+ F.append(kv([['labels',labs],['node flags',(r.flags||[]).length?flags:null],['requested host',r.host],['answered with',r.resp?`${r.resp.status} ${r.resp.kind} (${r.resp.bundle}/${r.resp.tier}, profile ${r.resp.profile})`:null],['header order',r.hdr_fp],['scheme',r.scheme?`${r.scheme} ${r.http||''}`:null],['body',bodyline],['body file',r.body_present?dl:null],['same body',seen],['body sha256',r.body_sha256],['received by hub',r.received_at]]));
  if(r.multipart&&r.multipart.boundary){const m=r.multipart;F.append(el('div','dsec','multipart framing'));
   F.append(kv([['boundary',m.boundary],['parts',m.parts],['preamble',m.preamble_len==null?'none':m.preamble_len+' B before the first boundary'],['epilogue',m.epilogue_len==null?null:m.epilogue_len+' B after the closing boundary'],['file parts',`${m.file_parts} (${m.empty_file_parts} empty)`],['max headers in one part',m.max_headers_in_part],['max field-name depth',m.max_name_depth],['upload-progress field',m.session_upload_progress?'present':'absent'],['field names',(m.names_sample||[]).join(', ')]]))}
  F.append(el('div','dsec','request line and headers, wire order'));
@@ -340,5 +349,5 @@ function renderEvent(){const r=dcur;if(!r)return;$('dtitle').textContent=`${r.me
   const text=dcollapse?squash(r.body):r.body;F.append(hl(r.multipart&&r.multipart.boundary?tokMultipart(text,r.multipart.boundary):tokRun(text,x=>tokData(x,r.content_type))))}
  else F.append(el('div','stat','no body'));
  dcontent.replaceChildren(F)}
-fpInit().then(()=>{initEvents();refresh();setInterval(refresh,60000)});
+fpInit().then(()=>{initEvents();refresh();storage();setInterval(refresh,60000);setInterval(storage,60000)});
 </script></body></html>

@@ -12,6 +12,8 @@ through a worker.
 | `/api/v1/ingest` | sensor batches (bearer token; see `docs/PROTOCOL.md`) |
 | `/api/v1/heartbeat` | sensor state + the address the hub saw it from |
 | `/api/v1/status` | stack checks as JSON (`/api/v1/docs` for the OpenAPI page) |
+| `/api/v1/storage` | database size against the volume, events, distinct bodies, retention policy, last sweep (also the gauge in the dashboard header and the card on `/status`) |
+| `/api/v1/events/{id}/body` | the stored request body, byte for byte; 410 once retention released it |
 | `/healthz` | liveness, no dependencies |
 | `/readyz` | readiness: DB + cache, 503 when either is down |
 
@@ -37,5 +39,13 @@ open http://127.0.0.1:8000
 | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CACHE_LOCATION` | Redis URLs |
 | `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE` | `1` behind the ingress |
 | `APP_VERSION` | baked in at build; shown on the page |
+| `STORAGE_CAPACITY_BYTES` | size of the Postgres volume (default 20 GiB); the gauge and the body budget are measured against it |
+| `RETENTION_EVENT_DAYS` | events older than this are deleted (default 365; 0 = never) |
+| `RETENTION_BODY_DAYS` | bodies of older events are released, the event keeps hash and size (default 90; 0 = never) |
+| `RETENTION_BODY_BUDGET` | share of the capacity bodies may fill before the oldest are released (default 0.5) |
+
+Request bodies are stored once per sha256 (`events.Body`); events point at the row, so a payload
+posted twenty times or seen again next month costs one copy and the detail view says how often it
+was seen. The retention sweep runs hourly in the worker (`apps/events/retention.py`).
 
 Cluster manifests: `thf-infra/clusters/thf-k8s-01/kubernetes/apps/internal/thf-pot/`.

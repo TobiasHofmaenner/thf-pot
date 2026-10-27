@@ -334,7 +334,7 @@ def context(e, known_hosts=()) -> dict:
     mp = e.multipart or {}
     # Rules see the first MiB: enough for any payload we have met, and bounded regex cost per event.
     # engine.for_rules() already cuts it in the database (body_head); a plain row is cut here.
-    raw = e.body_head if hasattr(e, "body_head") else e.body_sample
+    raw = e.body_head if hasattr(e, "body_head") else (e.body.data if e.body_id else None)
     body = bytes(raw or b"")[:RULE_BODY_BYTES].decode("latin-1")
     ctx = {
         "method": e.method, "path": e.path, "query": e.query, "target": e.target or e.path,

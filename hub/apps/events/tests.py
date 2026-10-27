@@ -1,13 +1,16 @@
+import hashlib
 import json
+from datetime import timedelta
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.nodes.models import Node
 
-from . import geo, tasks
-from .models import Event
+from . import geo, retention, storage, tasks
+from .models import Body, Event
 
 
 def mk_node(name="s1"):
@@ -17,12 +20,21 @@ def mk_node(name="s1"):
     return s
 
 
+_n = [0]
+
+
 def mk_event(node, **over):
-    kw = dict(node=node, ulid="01JAX0000000000000000000" + str(Event.objects.count()).zfill(2), ts=timezone.now(),
+    """body_sample= is stored the way ingest does it: one Body row per distinct sha256."""
+    _n[0] += 1
+    kw = dict(node=node, ulid=f"01JAX{_n[0]:021d}", ts=timezone.now(),
               src="203.0.113.9", method="GET", host="s1.example.org", target="/x", path="/x",
               headers=[["user-agent", "curl/8"]], resp={"status": 200, "tier": "full", "kind": "index", "bundle": "php", "profile": "p"},
               body_sample=b"abc")
     kw.update(over)
+    sample = kw.pop("body_sample", None)
+    if sample:
+        b = Body.store(sample, kw["ts"])
+        kw.update(body=b, body_size=len(sample), body_sha256=b.sha256)
     return Event.objects.create(**kw)
 
 
@@ -100,7 +112,8 @@ class EventsApiTests(TestCase):
         e = mk_event(self.s, body_sample=b"a=1&b=\xff", multipart={"boundary": "x", "parts": 2})
         d = self.client.get(f"/api/v1/events/{e.id}").json()
         self.assertEqual(d["body"], "a=1&b=\xff")
-        self.assertEqual((d["body_stored"], d["body_shown"]), (7, 7))
+        self.assertEqual((d["body_stored"], d["body_shown"], d["body_present"]), (7, 7, True))
+        self.assertEqual(d["body_seen"]["events"], 1)
         self.assertEqual(d["multipart"]["boundary"], "x")
         self.assertEqual(d["node"], "s1")
         self.assertEqual(self.client.get("/api/v1/events/999999").status_code, 404)
@@ -109,22 +122,113 @@ class EventsApiTests(TestCase):
         from .api import BODY_VIEW_BYTES
 
         body = b"x" * BODY_VIEW_BYTES + b"TAIL"
-        e = mk_event(self.s, body_sample=body, body_sha256="ab" * 32)
+        e = mk_event(self.s, body_sample=body)
         d = self.client.get(f"/api/v1/events/{e.id}").json()
         self.assertEqual((d["body_stored"], d["body_shown"], len(d["body"])), (len(body), BODY_VIEW_BYTES, BODY_VIEW_BYTES))
         r = self.client.get(f"/api/v1/events/{e.id}/body")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], "application/octet-stream")
-        self.assertEqual(r["X-Body-SHA256"], "ab" * 32)
+        self.assertEqual(r["X-Body-SHA256"], hashlib.sha256(body).hexdigest())
         self.assertEqual(r.content, body)
         self.assertEqual(self.client.get("/api/v1/events/999999/body").status_code, 404)
-        # the live feed leaves the body behind
         self.assertEqual(self.client.get("/api/v1/events/recent?n=1").json()[0]["id"], e.id)
+
+    def test_released_body_is_410_and_the_detail_says_so(self):
+        e = mk_event(self.s, body_sample=b"payload")
+        sha = e.body_sha256
+        Event.objects.filter(pk=e.pk).update(body=None)
+        d = self.client.get(f"/api/v1/events/{e.id}").json()
+        self.assertEqual((d["body_present"], d["body_stored"], d["body_sha256"], d["body"], d["body_seen"]), (False, 7, sha, "", None))
+        self.assertEqual(self.client.get(f"/api/v1/events/{e.id}/body").status_code, 410)
+        none = mk_event(self.s, body_sample=None)
+        self.assertEqual(self.client.get(f"/api/v1/events/{none.id}/body").status_code, 404)
+
+    def test_same_body_twice_is_one_row_and_the_detail_counts_it(self):
+        a = mk_event(self.s, body_sample=b"same")
+        b = mk_event(self.s, body_sample=b"same", ts=timezone.now() + timedelta(hours=1))
+        self.assertEqual(Body.objects.count(), 1)
+        self.assertEqual(a.body_id, b.body_id)
+        d = self.client.get(f"/api/v1/events/{a.id}").json()
+        self.assertEqual(d["body_seen"]["events"], 2)
+        self.assertEqual(d["body_seen"]["last"], b.ts.isoformat(timespec="seconds").replace("+00:00", "Z"))
 
     def test_dashboard_renders(self):
         r = self.client.get("/")
         self.assertContains(r, "Requests by source location")
         self.assertContains(r, "DB-IP")
+
+
+class StorageTests(TestCase):
+    def setUp(self):
+        cache.delete(storage.CACHE_KEY)
+        cache.delete(storage.LAST_SWEEP_KEY)
+        self.s = mk_node()
+
+    @override_settings(STORAGE_CAPACITY_BYTES=1000, RETENTION_BODY_BUDGET=0.5, RETENTION_EVENT_DAYS=365, RETENTION_BODY_DAYS=90)
+    def test_usage_endpoint_fragment_and_gauge(self):
+        mk_event(self.s, body_sample=b"x" * 100)
+        mk_event(self.s, body_sample=b"x" * 100)
+        mk_event(self.s, body_sample=None)
+        u = storage.usage(fresh=True)
+        self.assertEqual((u["events"]["count"], u["bodies"]["count"], u["bodies"]["bytes"], u["bodies"]["refs"]), (3, 1, 100, 2))
+        self.assertEqual(u["bodies"]["budget_bytes"], 500)
+        self.assertGreater(u["db_bytes"], 1000)
+        self.assertEqual(u["level"], "critical")  # a database is far bigger than a 1000-byte volume
+        self.assertEqual(u["retention"], {"event_days": 365, "body_days": 90, "body_budget": 0.5})
+        self.assertIsNone(u["last_sweep"])
+        self.assertEqual(self.client.get("/api/v1/storage").json()["events"]["count"], 3)
+        r = self.client.get("/_storage")
+        self.assertContains(r, "3 rows")
+        self.assertContains(r, "not yet run")
+        self.assertContains(self.client.get("/"), 'id="stbar"')
+        self.assertEqual(storage.human(3145754), "3.0 MiB")
+
+
+class RetentionTests(TestCase):
+    def setUp(self):
+        cache.delete(storage.CACHE_KEY)
+        cache.delete(storage.LAST_SWEEP_KEY)
+        self.s = mk_node()
+        self.now = timezone.now()
+
+    def ev(self, days_ago, body=None):
+        return mk_event(self.s, ts=self.now - timedelta(days=days_ago), body_sample=body)
+
+    @override_settings(RETENTION_EVENT_DAYS=30, RETENTION_BODY_DAYS=7, STORAGE_CAPACITY_BYTES=10**9, RETENTION_BODY_BUDGET=0.5)
+    def test_time_rules_delete_release_and_drop_orphans(self):
+        ancient = self.ev(40, b"old payload")  # the event goes
+        old = self.ev(10, b"old payload")  # released; its body row is then unreferenced and dropped
+        shared_old = self.ev(10, b"shared")  # released, but the row stays: a fresh event still points at it
+        fresh = self.ev(1, b"shared")
+        self.ev(1, None)
+        out = retention.sweep()
+        self.assertEqual((out["events_deleted"], out["bodies_released"], out["bodies_deleted"], out["bytes_freed"], out["pressure"]),
+                         (1, 2, 1, 11, False))
+        self.assertFalse(Event.objects.filter(pk=ancient.pk).exists())
+        old.refresh_from_db()
+        self.assertIsNone(old.body_id)
+        self.assertEqual((old.body_size, old.body_sha256), (11, hashlib.sha256(b"old payload").hexdigest()))
+        shared_old.refresh_from_db()
+        self.assertIsNone(shared_old.body_id)
+        self.assertEqual(list(Body.objects.values_list("sha256", flat=True)), [fresh.body_id])
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.body_bytes, b"shared")
+        self.assertEqual(cache.get(storage.LAST_SWEEP_KEY)["events_deleted"], 1)
+        again = retention.sweep()  # idempotent
+        self.assertEqual((again["events_deleted"], again["bodies_released"], again["bodies_deleted"]), (0, 0, 0))
+
+    @override_settings(RETENTION_EVENT_DAYS=0, RETENTION_BODY_DAYS=0, STORAGE_CAPACITY_BYTES=1000, RETENTION_BODY_BUDGET=0.5)
+    def test_budget_pressure_releases_the_oldest_bodies_first(self):
+        oldest, middle, newest = self.ev(5, b"a" * 300), self.ev(3, b"b" * 300), self.ev(1, b"c" * 300)
+        # live 900 B against a 500 B budget: free down to 450, oldest first, one event at a time here
+        with mock.patch.object(retention, "PRESSURE_CHUNK", 1):
+            out = retention.sweep()
+        self.assertTrue(out["pressure"])
+        self.assertEqual((out["events_deleted"], out["bodies_released"], out["bodies_deleted"], out["bytes_freed"]), (0, 2, 2, 600))
+        for e, has_body in ((oldest, False), (middle, False), (newest, True)):
+            e.refresh_from_db()
+            self.assertEqual(bool(e.body_id), has_body, e.body_sha256)
+        self.assertFalse(retention.sweep()["pressure"])  # 300 B live now, under budget
 
 
 class HeartbeatGeoTests(TestCase):

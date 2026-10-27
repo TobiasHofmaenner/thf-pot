@@ -1,0 +1,8 @@
+<div class="bar {{ u.level }}" title="{{ h.db }} of {{ h.cap }}"><i style="width:{{ u.pct|default:0 }}%"></i></div>
+<table>
+  <tr><th>database on disk</th><td class="{% if u.level == 'critical' %}bad{% elif u.level == 'warn' %}warn{% endif %}">{{ h.db }} of {{ h.cap }}{% if u.pct != None %} ({{ u.pct }} %){% endif %}</td></tr>
+  <tr><th>events</th><td>{{ u.events.count }} rows, {{ h.events_disk }} on disk{% if u.events.oldest_ts %}, oldest {{ u.events.oldest_ts|slice:":10" }}{% endif %}</td></tr>
+  <tr><th>bodies</th><td>{{ u.bodies.count }} distinct, {{ h.bodies_live }} live ({{ h.bodies_disk }} on disk), pointed at by {{ u.bodies.refs }} events; budget {{ h.budget }}</td></tr>
+  <tr><th>retention</th><td>events kept {{ h.event_days }} · bodies kept {{ h.body_days }} · above the budget the oldest bodies go first, the event keeps hash and size</td></tr>
+  <tr><th>last sweep</th><td>{% if u.last_sweep %}{{ u.last_sweep.at|slice:":16" }} UTC: {{ u.last_sweep.events_deleted }} events deleted, {{ u.last_sweep.bodies_released }} bodies released, {{ u.last_sweep.bodies_deleted }} dropped ({{ h.freed }}){% if u.last_sweep.pressure %}, <span class="warn">budget pressure</span>{% endif %}{% else %}<span class="mut">not yet run (hourly)</span>{% endif %}</td></tr>
+</table>
