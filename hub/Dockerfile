@@ -18,8 +18,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_
 RUN useradd --uid 10001 --user-group --system --shell /usr/sbin/nologin hub
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# constraints.txt pins every transitive package; see the note at its top.
+COPY requirements.txt constraints.txt ./
+RUN pip install -r requirements.txt -c constraints.txt
 
 COPY . .
 COPY --from=geo /geo /app/geo

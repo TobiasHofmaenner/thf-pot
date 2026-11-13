@@ -1,0 +1,43 @@
+# Every installed package, pinned. Used with: pip install -r requirements.txt -c constraints.txt
+#
+# requirements.txt only pins the direct dependencies, so every image rebuild
+# (each push, plus the monthly geo-data cron on the 3rd) re-resolved the rest.
+# The 2026-11-03 rebuild pulled kombu 5.7.0, which needs redis-py >= 6.4,
+# while celery 5.4.0's redis extra caps redis-py < 6.0: worker and beat
+# crash-looped with kombu VersionMismatch for ~10 days. python-dateutil
+# also jumped a major version (3 -> 4) in the same rebuild.
+#
+# This set is `pip freeze` from the 2026-10-27 image, which ran web, worker
+# and beat in production until that rebuild. To upgrade, change a version
+# here deliberately (celery 5.7 + kombu 5.7 + redis-py 6.4 move together).
+Django==5.1.14
+PyYAML==6.0.2
+amqp==5.4.1
+annotated-types==0.8.0
+asgiref==3.13.0
+billiard==4.3.1
+celery==5.4.0
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.4.1
+click==8.5.0
+django-ninja==1.3.0
+gunicorn==23.0.0
+kombu==5.6.2
+maxminddb==3.2.0
+packaging==26.3
+prompt_toolkit==3.0.53
+psycopg-binary==3.2.9
+psycopg==3.2.9
+pydantic==2.14.1
+pydantic_core==2.50.1
+python-dateutil==3.0.0
+redis==5.2.1
+six==1.17.0
+sqlparse==0.6.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.5
+vine==5.1.0
+wcwidth==0.9.4
+whitenoise==6.8.2

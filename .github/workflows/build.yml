@@ -70,11 +70,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12", cache: pip, cache-dependency-path: hub/requirements.txt }
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: "hub/requirements.txt\nhub/constraints.txt" }
       - name: check and test
         working-directory: hub
         run: |
-          pip install -r requirements.txt
+          pip install -r requirements.txt -c constraints.txt
           python manage.py check
           python manage.py makemigrations --check --dry-run
           python manage.py collectstatic --noinput   # templates use the hashed-manifest storage

@@ -1,3 +1,4 @@
+# Direct dependencies. Every transitive version is pinned in constraints.txt.
 Django==5.1.14
 django-ninja==1.3.0
 celery[redis]==5.4.0
